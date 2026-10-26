@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Driftwood Isle</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; background: #bfe3f5; font-family: "Trebuchet MS", "Segoe UI", sans-serif; }
+  body { position: fixed; inset: 0; -webkit-text-size-adjust: 100%; }
+  /* the game canvas owns every touch (pinch, drag) so the page itself never scrolls or zooms */
+  canvas { display: block; position: fixed; inset: 0; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  /* buttons and forms stay normal taps (no double-tap page zoom) */
+  button, input, #tools, #bagPanel, #login, #eatPopup, #exitPopup { touch-action: manipulation; }
+  .hud { position: fixed; pointer-events: none; color: #5a4632; user-select: none; }
+  .pill { background: rgba(255, 250, 238, 0.86); border-radius: 999px; padding: 8px 16px; box-shadow: 0 4px 14px rgba(80, 50, 20, 0.18); font-size: 15px; }
+  #clock { top: 16px; right: 16px; text-align: right; }
+  #clock small { display: block; opacity: 0.7; font-size: 12px; margin-top: 2px; }
+  #toast { bottom: 26px; left: 50%; transform: translateX(-50%) translateY(10px); opacity: 0; transition: opacity 0.6s, transform 0.6s; white-space: nowrap; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #players { bottom: 100px; right: 16px; font-size: 13px; }
+  @media (max-width: 600px) { #toolPanel .slot, #bagPanel .slot { width: 58px; height: 58px; } #bagPanel .grid { grid-template-columns: repeat(3, 58px); } #toolPanel { gap: 8px; padding: 10px; } }
+  /* ---- wooden UI: cream panels in a rounded wood frame, leafy corners, sunken slots ---- */
+  :root { --wood: #b07a4a; --wood-dark: #7d5332; --wood-light: #cf9e6c; --cream: #fbf3df; --slot: #efe1c3; --slot-dark: #e2d0ab; --ink: #5a4632; --glow: #ffd862; }
+  #tools { position: fixed; right: 16px; bottom: 22px; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; user-select: none; }
+  #tools button { font: inherit; color: var(--ink); border: none; cursor: pointer; padding: 0; background: none; -webkit-tap-highlight-color: transparent; }
+  .wood-frame { position: relative; background: var(--cream); border-radius: 22px;
+    box-shadow: inset 0 0 0 2px #fffaf0, 0 0 0 5px var(--wood), 0 0 0 7px var(--wood-dark), 0 8px 18px rgba(70, 40, 15, 0.3);
+    background-image: radial-gradient(circle at 20% 15%, #fffaf0 0, transparent 60%); }
+  .wood-frame::before, .wood-frame::after { content: ''; position: absolute; width: 34px; height: 24px; pointer-events: none;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 24'%3E%3Cpath d='M3 18 C6 6 16 3 22 6 C17 13 10 18 3 18Z' fill='%2378b84e' stroke='%23447a2c' stroke-width='1.5'/%3E%3Cpath d='M15 21 C19 11 27 9 32 12 C28 19 21 22 15 21Z' fill='%238fca5e' stroke='%23447a2c' stroke-width='1.5'/%3E%3Cpath d='M5 17 L18 8 M17 20 L29 13' stroke='%23447a2c' stroke-width='1' fill='none'/%3E%3C/svg%3E") no-repeat center / contain; }
+  .wood-frame::before { top: -14px; left: -12px; }
+  .wood-frame::after { bottom: -12px; right: -12px; transform: rotate(180deg); }
+  #toolPanel { display: none; gap: 10px; padding: 12px 14px; }
+  #toolPanel.open { display: flex; }
+  .slot { position: relative; width: 66px; height: 66px; border-radius: 16px; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(180deg, var(--slot-dark), var(--slot)); box-shadow: inset 0 2px 4px rgba(120, 85, 40, 0.18), 0 1px 0 #fffaf0; transition: transform 0.15s, box-shadow 0.15s, background 0.15s; }
+  .slot svg { width: 46px; height: 46px; filter: drop-shadow(0 2px 1px rgba(90, 60, 30, 0.25)); }
+  #tools button.slot:hover { transform: translateY(-2px); }
+  #eatPopup, #exitPopup { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 8; display: none; flex-direction: column; align-items: center; gap: 8px;
+    width: min(260px, calc(100vw - 48px)); padding: 20px 18px 16px; color: var(--ink); text-align: center; user-select: none; }
+  #eatPopup.open, #exitPopup.open { display: flex; }
+  #eatPopup .slot { width: 76px; height: 76px; }
+  #eatPopup .slot svg { width: 54px; height: 54px; }
+  #eatPopup h3, #exitPopup h3 { margin: 4px 0 0; font-size: 17px; }
+  #eatPopup .gain { font-size: 15px; font-weight: bold; color: #4f8f2f; }
+  #eatPopup .note, #exitPopup .note { min-height: 16px; font-size: 13px; color: #b0583a; }
+  #eatPopup .buttons, #exitPopup .buttons { display: flex; gap: 10px; width: 100%; margin-top: 2px; }
+  #eatPopup button, #exitPopup button { flex: 1; font: inherit; font-size: 15px; padding: 10px; border-radius: 14px; border: none; cursor: pointer; color: var(--ink);
+    box-shadow: 0 3px 0 rgba(120, 85, 40, 0.35); transition: transform 0.12s; }
+  #eatPopup button:hover:not(:disabled), #exitPopup button:hover:not(:disabled) { transform: translateY(-1px); }
+  #exitPopup .buttons { flex-direction: column; gap: 8px; }
+  #exitPopup .eat, #eatPopup .eat { background: linear-gradient(180deg, #ffe8a0, #ffd36a); }
+  #eatPopup .cancel, #exitPopup .cancel { background: linear-gradient(180deg, var(--slot), var(--slot-dark)); }
+  #eatPopup button:disabled, #exitPopup button:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+  #toolPanel button.selected { background: linear-gradient(180deg, #fff1bd, #ffe597); box-shadow: 0 0 0 3px var(--glow), 0 0 14px 3px rgba(255, 216, 98, 0.75), inset 0 0 6px #fff7d6; }
+  #tools .row { display: flex; gap: 12px; }
+  .round-btn { width: 62px; height: 62px; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative;
+    background: radial-gradient(circle at 50% 40%, #9a6a42, #7d5332 70%); box-shadow: inset 0 0 0 4px var(--wood-light), inset 0 0 0 7px var(--wood-dark), 0 6px 14px rgba(70, 40, 15, 0.35); transition: transform 0.15s, box-shadow 0.2s; }
+  .round-btn svg { width: 34px; height: 34px; filter: drop-shadow(0 2px 1px rgba(40, 20, 5, 0.35)); }
+  .round-btn::after { content: ''; position: absolute; right: -8px; bottom: -4px; width: 26px; height: 18px; transform: rotate(-20deg);
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 24'%3E%3Cpath d='M3 18 C6 6 16 3 22 6 C17 13 10 18 3 18Z' fill='%2378b84e' stroke='%23447a2c' stroke-width='1.5'/%3E%3Cpath d='M15 21 C19 11 27 9 32 12 C28 19 21 22 15 21Z' fill='%238fca5e' stroke='%23447a2c' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat center / contain; }
+  #tools .round-btn:hover { transform: translateY(-2px); }
+  .round-btn.active { box-shadow: inset 0 0 0 4px #ffcf4a, inset 0 0 0 7px #e0a020, 0 0 0 3px rgba(255, 216, 98, 0.6), 0 0 18px 4px rgba(255, 210, 80, 0.75); }
+  #bagPanel { display: none; flex-direction: column; gap: 10px; padding: 16px; color: var(--ink); font-size: 14px; max-height: 60vh; }
+  #bagPanel.open { display: flex; }
+  #bagPanel h3 { margin: 0 4px; font-size: 15px; }
+  #bagPanel .grid { display: grid; grid-template-columns: repeat(3, 66px); gap: 10px; overflow-y: auto; padding: 4px; }
+  #bagPanel .slot b { position: absolute; right: 6px; bottom: 3px; font-size: 15px; color: #4a3626; text-shadow: 0 0 2px #fffaf0, 0 0 3px #fffaf0; }
+  #bagPanel .slot.eat { cursor: pointer; }
+  #bagPanel .slot.eat:hover { transform: translateY(-2px); box-shadow: 0 0 0 3px var(--glow), 0 0 10px 2px rgba(255, 216, 98, 0.6); }
+  #bagPanel .slot.eat::after { content: '+'; }
+  #bagPanel .close { position: absolute; top: -16px; right: -16px; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 40%, #a5734a, #7d5332 70%); box-shadow: inset 0 0 0 3px var(--wood-light), 0 3px 8px rgba(70, 40, 15, 0.35); }
+  #bagPanel .close svg { width: 18px; height: 18px; }
+  #bagPanel .hint { font-size: 11px; opacity: 0.65; text-align: center; }
+  #bagPanel .empty { opacity: 0.75; font-style: italic; }
+  #energy { top: 16px; left: 16px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  #energy .track { width: 160px; height: 12px; border-radius: 999px; background: rgba(90, 70, 50, 0.15); overflow: hidden; }
+  #energy .fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #8fd16a, #ffd25a); transition: width 0.4s; }
+  @media (max-width: 600px) { #energy { gap: 6px; padding: 8px 12px; } #energy .label, #clock .keys { display: none; } #energy .track { width: 64px; } #clock { font-size: 13px; } }
+  #logout { position: fixed; top: 66px; left: 16px; font: inherit; font-size: 13px; color: #5a4632; border: none; cursor: pointer; border-radius: 999px; padding: 6px 14px; background: rgba(255, 250, 238, 0.86); box-shadow: 0 4px 14px rgba(80, 50, 20, 0.18); display: none; }
+  #logout.show { display: block; }
+  #login { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(60, 90, 110, 0.35); backdrop-filter: blur(3px); }
+  #login.hidden { display: none; }
+  #login form { width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 10px; padding: 24px; border-radius: 22px; background: rgba(255, 250, 238, 0.96); box-shadow: 0 10px 30px rgba(60, 40, 20, 0.25); color: #5a4632; }
+  #login h1 { margin: 0; font-size: 24px; text-align: center; }
+  #login p { margin: 0 0 6px; font-size: 13px; text-align: center; opacity: 0.75; }
+  #login label { font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+  #login input { font: inherit; font-size: 15px; padding: 9px 12px; border-radius: 12px; border: 2px solid #e8d8bc; background: #fffdf8; color: #5a4632; outline: none; }
+  #login input:focus { border-color: #f2a84a; }
+  #login .buttons { display: flex; gap: 8px; margin-top: 4px; }
+  #login button { flex: 1; font: inherit; font-size: 14px; padding: 10px; border-radius: 12px; border: none; cursor: pointer; background: #ffd98a; color: #5a4632; }
+  #login button.secondary { background: #e9f1e1; }
+  #login button:disabled { opacity: 0.5; cursor: default; }
+  #loginMsg { min-height: 18px; font-size: 13px; text-align: center; color: #c0503a; }
+  #loginMsg.info { color: #5a4632; opacity: 0.75; }
+  #help { bottom: 26px; left: 16px; font-size: 12px; opacity: 0.85; }
+  @media (max-width: 600px) { #help { display: none; } }
+
+  /* floating seat circles: one small cream circle in a wood rim on each seat spot, with a little pointer. The visible
+     circle is 34px; the button around it is a 48 x 54px invisible tap area. The layer sits above the game but below
+     the main UI and lets every touch through except on the circles themselves. */
+  #seatBubbles { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .seat-bubble { position: absolute; left: 0; top: 0; width: 48px; height: 54px; padding: 0 0 6px; border: none; background: none; cursor: pointer;
+    display: flex; align-items: flex-end; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.3s ease; touch-action: manipulation; -webkit-tap-highlight-color: transparent; will-change: transform, opacity; }
+  .seat-bubble.show { opacity: 1; pointer-events: auto; }
+  .seat-bubble .bob { position: relative; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%;
+    background: radial-gradient(circle at 50% 35%, #fffaf0, #f6e7c6); box-shadow: inset 0 0 0 2px #cf9e6c, 0 0 0 2px #8a5a36, 0 4px 8px rgba(70, 40, 15, 0.3);
+    animation: seatBob 2.2s ease-in-out infinite; }
+  .seat-bubble .bob::after { content: ''; position: absolute; left: 50%; bottom: -6px; width: 8px; height: 8px; background: #8a5a36; transform: translateX(-50%) rotate(45deg); border-radius: 0 0 2px 0; z-index: -1; }
+  .seat-bubble svg { width: 22px; height: 22px; }
+  .seat-bubble:active .bob, .seat-bubble.pressed .bob { filter: brightness(0.93); animation-play-state: paused; }
+  /* the rotate handle beside the item in hand: drag it around the item to turn it */
+  .rot-handle { position: absolute; left: 0; top: 0; width: 46px; height: 46px; border: none; padding: 0; border-radius: 50%; cursor: grab; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 35%, #fffaf0, #f6e7c6); box-shadow: inset 0 0 0 2px #cf9e6c, 0 0 0 2px #8a5a36, 0 4px 10px rgba(70, 40, 15, 0.3);
+    opacity: 0; pointer-events: none; transition: opacity 0.2s; touch-action: none; }
+  .rot-handle.show { opacity: 1; pointer-events: auto; }
+  .rot-handle.pressed { cursor: grabbing; filter: brightness(0.93); }
+  .rot-handle svg { width: 26px; height: 26px; }
+  @keyframes seatBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+
+  /* House Tool catalog: one slim bar docked at the bottom, a single row of item cards that scrolls sideways */
+  .hidden { display: none !important; }
+  :root { --bar-h: 92px; --bar-b: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  #buildPanel { position: fixed; left: calc(10px + env(safe-area-inset-left, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); bottom: var(--bar-b);
+    height: var(--bar-h); box-sizing: border-box; display: none; align-items: center; gap: 6px; padding: 8px 8px 8px 10px; border-radius: 20px; color: #5a4632; touch-action: pan-x; user-select: none; }
+  #buildPanel.open { display: flex; }
+  #buildPanel .count { flex: none; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; opacity: 0.6; }
+  #buildPanel .catalog { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scrollbar-width: none; padding: 2px; -webkit-overflow-scrolling: touch; touch-action: pan-x; }
+  #buildPanel .catalog::-webkit-scrollbar { display: none; }
+  #buildPanel .card { flex: none; width: 62px; height: 66px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; border: none; padding: 0; cursor: pointer; scroll-snap-align: start;
+    border-radius: 14px; color: #5a4632; font: inherit; background: linear-gradient(180deg, var(--slot-dark), var(--slot)); box-shadow: inset 0 2px 4px rgba(120, 85, 40, 0.18); touch-action: pan-x; }
+  #buildPanel .card svg { width: 36px; height: 36px; pointer-events: none; }
+  #buildPanel .card span { font-size: 10px; line-height: 1.1; white-space: nowrap; pointer-events: none; }
+  #buildPanel .card.selected { background: linear-gradient(180deg, #fff1bd, #ffe597); box-shadow: 0 0 0 3px var(--glow), 0 0 10px 2px rgba(255, 216, 98, 0.7); }
+  #buildPanel .close { flex: none; width: 34px; height: 34px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 40%, #a5734a, #7d5332 70%); box-shadow: inset 0 0 0 3px var(--wood-light), 0 3px 8px rgba(70, 40, 15, 0.35); }
+  #buildPanel .close svg { width: 16px; height: 16px; }
+  /* rotate / cancel / remove: small circles just above the bar's right end while an item is in hand */
+  /* the round tab on the bar's top edge: "V" folds the bar down to just the tab, "^" opens it again */
+  #buildPanel .bar-toggle { position: absolute; left: 50%; top: -24px; transform: translateX(-50%); width: 48px; height: 48px; border-radius: 50%; border: none; padding: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 35%, #fffaf0, #f6e7c6);
+    box-shadow: inset 0 0 0 2px #cf9e6c, 0 0 0 3px #8a5a36, 0 4px 10px rgba(70, 40, 15, 0.3); touch-action: manipulation; -webkit-tap-highlight-color: transparent; z-index: 1; }
+  #buildPanel .bar-toggle svg { width: 26px; height: 26px; }
+  #buildPanel.collapsed { height: 0; padding: 0; background: none; box-shadow: none; pointer-events: none; }
+  #buildPanel.collapsed::before, #buildPanel.collapsed::after, #buildPanel.collapsed > :not(.bar-toggle) { display: none; }
+  #buildPanel.collapsed .bar-toggle { top: -48px; pointer-events: auto; }
+  body.bar-collapsed #toast { bottom: calc(var(--bar-b) + 60px) !important; }
+  body.bar-collapsed #buildActs { bottom: calc(100px + var(--safe-b)); }
+  body.bar-collapsed #help { display: none; }
+  #buildActs { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(var(--bar-b) + var(--bar-h) + 8px); display: none; gap: 8px; }
+  #buildActs.show { display: flex; }
+  #buildActs button { width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer; font: inherit; font-size: 20px; color: #5a4632; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 35%, #fffaf0, #f6e7c6); box-shadow: inset 0 0 0 2px #cf9e6c, 0 0 0 2px #8a5a36, 0 4px 10px rgba(70, 40, 15, 0.3); touch-action: manipulation; }
+  #buildActs [data-act="remove"] { color: #c0503a; }
+  /* while the bar is open the bottom-right buttons, player count and messages move up above it; the help line hides */
+  body.building #tools { bottom: calc(var(--bar-b) + var(--bar-h) + 60px) !important; }
+  body.building #players { bottom: calc(var(--bar-b) + var(--bar-h) + 138px) !important; }
+  body.building #toast { bottom: calc(var(--bar-b) + var(--bar-h) + 12px) !important; }
+  body.building #help { display: none; }
+  @media (max-width: 600px) { :root { --bar-h: 84px; } #buildPanel .card { width: 56px; height: 60px; } #buildPanel .card svg { width: 32px; height: 32px; } }
+  /* inside a house: the "<" back button just below the energy bar (log out moves down below it), the Save button
+     to its right while there are unsaved furniture changes, and the clear shade behind the exit popup */
+  #backBtn { position: fixed; display: none; width: 50px; height: 50px; border: none; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  #backBtn svg { width: 26px; height: 26px; }
+  body.in-room #backBtn { display: flex; }
+  body.in-room #logout { top: calc(170px + var(--safe-t)); }
+  #saveBtn { position: fixed; display: none; align-items: center; gap: 7px; min-height: 44px; padding: 6px 18px; border: none; cursor: pointer;
+    font: inherit; font-size: 15px; font-weight: bold; color: var(--ink); border-radius: 999px; background: linear-gradient(180deg, #ffe8a0, #ffd36a);
+    box-shadow: inset 0 0 0 2px #fff3c8, 0 0 0 3px var(--wood), 0 5px 12px rgba(70, 40, 15, 0.3); -webkit-tap-highlight-color: transparent; }
+  #saveBtn.show { display: flex; }
+  #saveBtn .dot { width: 9px; height: 9px; border-radius: 50%; background: #e2735a; box-shadow: 0 0 0 2px #fff3c8; }
+  #saveBtn small { font-size: 11px; font-weight: normal; opacity: 0.7; }
+  #exitShade { position: fixed; inset: 0; display: none; background: rgba(40, 30, 20, 0.18); }
+  #exitShade.open { display: block; }
+  /* talking to a shopkeeper: a wood-framed box above the bottom buttons (portrait, name label, typed line, choices) and
+     the shop panel in the middle; the floating "..." bubbles reuse the seat-circle look */
+  #dialogue { position: fixed; left: 50%; bottom: calc(142px + var(--safe-b, 0px)); transform: translateX(-50%); width: min(560px, calc(100vw - 40px)); box-sizing: border-box;
+    display: none; gap: 12px; align-items: flex-start; padding: 16px 16px 14px; color: var(--ink); cursor: pointer; user-select: none; touch-action: manipulation; }
+  #dialogue.open { display: flex; }
+  #dlgPortrait { flex: none; width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px;
+    background: radial-gradient(circle at 50% 35%, #fffaf0, #f6e7c6); box-shadow: inset 0 0 0 2px #cf9e6c, 0 0 0 3px #8a5a36, 0 3px 8px rgba(70, 40, 15, 0.25); }
+  #dialogue .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  #dlgName { align-self: flex-start; margin-top: -30px; padding: 3px 14px; border-radius: 999px; font-weight: bold; font-size: 14px; color: #3f2f22; box-shadow: 0 0 0 3px var(--cream), 0 3px 6px rgba(70, 40, 15, 0.25); }
+  #dlgText { min-height: 44px; font-size: 16px; line-height: 1.4; }
+  #dlgMore { position: absolute; right: 18px; bottom: 8px; font-size: 13px; color: #b07a4a; opacity: 0; animation: seatBob 1.2s ease-in-out infinite; }
+  #dlgMore.show { opacity: 1; }
+  #dlgChoices { display: none; flex-wrap: wrap; gap: 8px; }
+  #dlgChoices.show { display: flex; }
+  #dlgChoices button { flex: 1 1 40%; min-height: 44px; font: inherit; font-size: 15px; border: none; border-radius: 999px; cursor: pointer; color: var(--ink);
+    background: linear-gradient(180deg, var(--slot), var(--slot-dark)); box-shadow: 0 3px 0 rgba(120, 85, 40, 0.35); transition: transform 0.12s; }
+  #dlgChoices button:hover { transform: translateY(-1px); }
+  #dlgChoices button[data-talk="shop"] { background: linear-gradient(180deg, #ffe8a0, #ffd36a); }
+  #shopPanel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(320px, calc(100vw - 48px)); box-sizing: border-box; display: none; flex-direction: column; gap: 10px;
+    padding: 18px 16px 14px; color: var(--ink); user-select: none; touch-action: manipulation; max-height: calc(100vh - 80px); }
+  #shopPanel.open { display: flex; }
+  #shopPanel h3 { margin: 0 4px; font-size: 17px; }
+  #shopList { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+  .shop-row { display: flex; align-items: center; gap: 10px; }
+  .shop-row .shop-icon { width: 48px; height: 48px; flex: none; font-size: 28px; }
+  .shop-name { flex: 1; font-size: 14px; }
+  .shop-price { font-size: 13px; font-weight: bold; color: #8a5a36; }
+  .shop-buy { font: inherit; font-size: 13px; padding: 7px 12px; border: none; border-radius: 12px; background: linear-gradient(180deg, #ffe8a0, #ffd36a); color: var(--ink); }
+  .shop-buy:disabled { opacity: 0.45; cursor: default; }
+  #shopPanel .soon { text-align: center; font-size: 13px; color: #b0583a; }
+  #shopClose { position: absolute; top: -16px; right: -16px; width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 40%, #a5734a, #7d5332 70%); box-shadow: inset 0 0 0 3px var(--wood-light), 0 3px 8px rgba(70, 40, 15, 0.35); }
+  #shopClose svg { width: 18px; height: 18px; }
+  .talk-bubble .bob { width: 38px; height: 30px; border-radius: 16px; }
+  .talk-bubble svg { width: 26px; height: 26px; }
+  /* coins: a gold coin and the number under the energy bar; a little "+N" floats up when it grows */
+  #coins { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: bold; padding: 6px 14px 6px 8px; }
+  #coins svg { width: 22px; height: 22px; filter: drop-shadow(0 1px 1px rgba(120, 80, 10, 0.35)); }
+  #coins.bump { animation: coinBump 0.5s ease; }
+  .coin-pop { position: absolute; left: 100%; top: 50%; margin-left: 6px; font-weight: bold; color: #c08a10; text-shadow: 0 0 3px #fffaf0, 0 0 4px #fffaf0; animation: coinPop 1.2s ease-out forwards; }
+  @keyframes coinPop { 0% { opacity: 0; transform: translateY(-20%); } 15% { opacity: 1; } 100% { opacity: 0; transform: translateY(-160%); } }
+  @keyframes coinBump { 0%, 100% { transform: scale(1); } 40% { transform: scale(1.12); } }
+  /* Bo's sell panel: a list of what's in your backpack with steppers, a total and a Sell button */
+  #sellPanel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(380px, calc(100vw - 40px)); box-sizing: border-box; display: none; flex-direction: column; gap: 10px;
+    padding: 18px 16px 14px; color: var(--ink); user-select: none; touch-action: manipulation; max-height: calc(100vh - 90px); }
+  #sellPanel.open { display: flex; }
+  #sellPanel .head { display: flex; align-items: center; gap: 10px; }
+  #sellPanel .head .face { flex: none; width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px;
+    background: radial-gradient(circle at 50% 35%, #fffaf0, #f6e7c6); box-shadow: inset 0 0 0 2px #cf9e6c, 0 0 0 3px #8a5a36; }
+  #sellPanel h3 { margin: 0; font-size: 16px; }
+  #sellLine { font-size: 14px; line-height: 1.35; }
+  #sellList { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; padding: 2px; }
+  .sell-row { display: flex; align-items: center; gap: 8px; }
+  .sell-row.off { opacity: 0.45; filter: grayscale(0.8); }
+  .sell-icon { width: 44px; height: 44px; flex: none; }
+  .sell-icon svg { width: 32px; height: 32px; }
+  .sell-name { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 14px; }
+  .sell-name small { font-size: 11px; opacity: 0.75; }
+  .stepper { display: flex; align-items: center; gap: 4px; flex: none; }
+  .stepper b { min-width: 20px; text-align: center; }
+  .stepper button { width: 32px; height: 32px; border: none; border-radius: 50%; cursor: pointer; font: inherit; font-size: 18px; color: var(--ink); padding: 0;
+    background: linear-gradient(180deg, var(--slot), var(--slot-dark)); box-shadow: 0 2px 0 rgba(120, 85, 40, 0.35); }
+  .stepper button.max { width: auto; border-radius: 12px; padding: 0 8px; font-size: 12px; }
+  .stepper button:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+  #sellPanel .foot { display: flex; align-items: center; gap: 10px; }
+  #sellTotal { flex: 1; font-weight: bold; font-size: 15px; }
+  #sellBtn { min-width: 110px; min-height: 44px; font: inherit; font-size: 15px; border: none; border-radius: 14px; cursor: pointer; color: var(--ink);
+    background: linear-gradient(180deg, #ffe8a0, #ffd36a); box-shadow: 0 3px 0 rgba(120, 85, 40, 0.35); }
+  #sellBtn:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+  .sell-empty { opacity: 0.75; font-style: italic; font-size: 13px; }
+  #sellClose { position: absolute; top: -16px; right: -16px; width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 40%, #a5734a, #7d5332 70%); box-shadow: inset 0 0 0 3px var(--wood-light), 0 3px 8px rgba(70, 40, 15, 0.35); }
+  #sellClose svg { width: 18px; height: 18px; }
+  /* the short fade when going in or out of a house */
+  #fade { position: fixed; inset: 0; background: #1e1a16; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+  #fade.show { opacity: 1; }
+
+  /* ---- layer order: the game canvas at the bottom, the UI above it, then popups and the login screen.
+     Every fixed element sets its own z-index; without one, whatever comes later in the page is drawn on top. */
+  #game { z-index: 0; }
+  #seatBubbles { z-index: 10; }
+  #fade { z-index: 15; }
+  .hud, #tools, #logout, #buildPanel, #buildActs, #backBtn, #saveBtn { z-index: 20; }
+  #exitShade { z-index: 29; }
+  #dialogue { z-index: 19; }
+  #shopPanel, #sellPanel { z-index: 30; }
+  #eatPopup, #exitPopup { z-index: 30; }
+  #login { z-index: 40; }
+
+  /* ---- phone safe areas (notches, rounded corners, home bar); all zero on ordinary screens */
+  :root { --safe-t: env(safe-area-inset-top, 0px); --safe-r: env(safe-area-inset-right, 0px); --safe-b: env(safe-area-inset-bottom, 0px); --safe-l: env(safe-area-inset-left, 0px); }
+  #energy { top: calc(16px + var(--safe-t)); left: calc(16px + var(--safe-l)); }
+  #coins { top: calc(62px + var(--safe-t)); left: calc(16px + var(--safe-l)); }
+  #logout { top: calc(110px + var(--safe-t)); left: calc(16px + var(--safe-l)); }
+  #backBtn { top: calc(110px + var(--safe-t)); left: calc(16px + var(--safe-l)); }
+  #saveBtn { top: calc(113px + var(--safe-t)); left: calc(76px + var(--safe-l)); } /* beside "<" (50px wide at left 16), below the energy bar */
+  #clock { top: calc(16px + var(--safe-t)); right: calc(16px + var(--safe-r)); }
+  #tools { right: calc(16px + var(--safe-r)); bottom: calc(22px + var(--safe-b)); max-width: calc(100vw - 32px - var(--safe-l) - var(--safe-r)); }
+  #players { right: calc(16px + var(--safe-r)); bottom: calc(100px + var(--safe-b)); }
+  #help { left: calc(16px + var(--safe-l)); bottom: calc(26px + var(--safe-b)); }
+  #toast { bottom: calc(26px + var(--safe-b)); max-width: calc(100vw - 32px - var(--safe-l) - var(--safe-r)); white-space: normal; text-align: center; }
+  #login { padding: calc(16px + var(--safe-t)) calc(16px + var(--safe-r)) calc(16px + var(--safe-b)) calc(16px + var(--safe-l)); }
+  #bagPanel { max-height: calc(100vh - 160px - var(--safe-t) - var(--safe-b)); }
+  /* phones held sideways are short: keep the open panels clear of the top corners */
+  @media (max-height: 480px) { #toolPanel .slot, #bagPanel .slot { width: 50px; height: 50px; } #bagPanel .grid { grid-template-columns: repeat(3, 50px); } .round-btn { width: 52px; height: 52px; } #players { bottom: calc(86px + var(--safe-b)); } }
+
+  /* ---- the island HUD, wood-and-cream style: energy and the tool bar at the bottom left, the toolbox and backpack
+     buttons at the bottom right, coins at the top left, the clock at the top right. Later rules here win. */
+  .pill { background: linear-gradient(180deg, #fffaf0, var(--cream)); color: var(--ink);
+    box-shadow: inset 0 0 0 2px #fffaf0, 0 0 0 3px var(--wood), 0 0 0 5px var(--wood-dark), 0 6px 14px rgba(70, 40, 15, 0.28); }
+  #clock { border-radius: 18px; padding: 8px 16px 7px; }
+  #toast { padding: 9px 18px; }
+  #energy { top: auto; bottom: calc(22px + var(--safe-b)); left: calc(16px + var(--safe-l)); padding: 5px 14px 5px 5px; gap: 8px; }
+  #energy .bolt { flex: none; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 35%, #fff6c0, #ffd23f); box-shadow: inset 0 0 0 2px #e0a020, 0 2px 3px rgba(120, 80, 10, 0.3); }
+  #energy .bolt svg { width: 20px; height: 20px; }
+  #energy .label { display: none; }
+  #energy .track { width: 150px; height: 14px; background: #eadcbf; box-shadow: inset 0 2px 3px rgba(90, 60, 30, 0.3); }
+  #energy .fill { background: linear-gradient(180deg, #b2ea72, #5fbf3a); box-shadow: inset 0 -3px 0 rgba(40, 110, 20, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.55); }
+  #energyText { min-width: 24px; font-weight: bold; }
+  /* the tool bar opens as a row at the bottom left, just above the energy bar */
+  #toolPanel { position: fixed; left: calc(16px + var(--safe-l)); bottom: calc(82px + var(--safe-b)); padding: 10px 12px; gap: 8px; }
+  body.building #toolPanel { bottom: calc(var(--bar-b) + var(--bar-h) + 72px); }
+  body.building #energy { bottom: calc(var(--bar-b) + var(--bar-h) + 14px) !important; }
+  /* top left: coins, then log out; inside a house the "<" and Save sit in that row and log out moves below them */
+  #coins { top: calc(16px + var(--safe-t)); }
+  #logout { top: calc(66px + var(--safe-t)); background: linear-gradient(180deg, #fffaf0, var(--cream)); padding: 7px 16px;
+    box-shadow: inset 0 0 0 2px #fffaf0, 0 0 0 3px var(--wood), 0 4px 10px rgba(70, 40, 15, 0.25); }
+  #backBtn { top: calc(62px + var(--safe-t)); }
+  #saveBtn { top: calc(65px + var(--safe-t)); }
+  body.in-room #logout { top: calc(126px + var(--safe-t)); }
+  #help { bottom: auto; top: calc(18px + var(--safe-t)); left: 50%; transform: translateX(-50%); white-space: nowrap; }
+  @media (max-width: 900px) { #help { display: none; } }
+  /* messages float just above the bottom bars; the player count sits under the clock */
+  #toast { bottom: calc(96px + var(--safe-b)); }
+  #players { bottom: auto; top: calc(86px + var(--safe-t)); }
+  body.building #players { bottom: auto !important; }
+  @media (max-width: 600px) { #energy .track { width: 84px; } #toolPanel { bottom: calc(92px + var(--safe-b)); } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./lib/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="clock" class="hud pill"><span id="clockName">--:-- MYT</span><small id="sunTimes"></small><small class="keys">1 Day · 2 Dusk · 3 Night · 0 Real time</small></div>
+<div id="help" class="hud pill">Click the ground to walk · click shells, fruit and flowers to pick them up</div>
+<div id="toast" class="hud pill"></div>
+<div id="players" class="hud pill">Connecting…</div>
+<div id="tools">
+  <div id="toolPanel" class="wood-frame">
+    <button class="slot" data-tool="axe" title="Axe" aria-label="Axe"></button>
+    <button class="slot" data-tool="can" title="Watering Can" aria-label="Watering Can"></button>
+    <button class="slot" data-tool="rod" title="Fishing Rod" aria-label="Fishing Rod"></button>
+    <button class="slot" data-tool="net" title="Bug Net" aria-label="Bug Net"></button>
+    <button class="slot hidden" data-tool="house" title="House Tool" aria-label="House Tool"></button>
+  </div>
+  <div id="bagPanel" class="wood-frame"></div>
+  <div class="row">
+    <button id="bagBtn" class="round-btn" title="Backpack" aria-label="Backpack"></button>
+    <button id="toolBtn" class="round-btn" title="Tools" aria-label="Tools"></button>
+  </div>
+</div>
+<div id="seatBubbles"></div>
+<div id="fade"></div>
+<div id="buildPanel" class="wood-frame" aria-label="House Tool catalog">
+  <button type="button" class="bar-toggle" data-act="toggle" title="Hide the furniture bar" aria-label="Hide the furniture bar"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M13 19 L24 30 L35 19" fill="none" stroke="#7d5332" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  <span class="count"></span>
+  <div class="catalog"></div>
+  <button type="button" class="close" data-act="close" title="Close the House Tool" aria-label="Close the House Tool"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M13 13 L35 35 M35 13 L13 35" stroke="#fbf0dc" stroke-width="7" stroke-linecap="round"/></svg></button>
+</div>
+<div id="buildActs">
+  <button type="button" data-act="rotate" title="Rotate" aria-label="Rotate">↻</button>
+  <button type="button" data-act="remove" class="hidden" title="Remove (back to the catalog)" aria-label="Remove">🗑</button>
+  <button type="button" data-act="cancel" title="Cancel" aria-label="Cancel">✕</button>
+</div>
+<div id="eatPopup" class="wood-frame" role="dialog" aria-modal="true" aria-labelledby="eatName">
+  <div class="slot" id="eatIcon"></div>
+  <h3 id="eatName"></h3>
+  <div class="gain" id="eatGain"></div>
+  <div class="note" id="eatNote"></div>
+  <div class="buttons">
+    <button type="button" class="eat" id="eatYes">Eat</button>
+    <button type="button" class="cancel" id="eatNo">Cancel</button>
+  </div>
+</div>
+<button id="logout" type="button">Log out</button>
+<button id="backBtn" class="round-btn" type="button" title="Leave the house" aria-label="Leave the house"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M29 11 L16 24 L29 37" fill="none" stroke="#fbf0dc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+<button id="saveBtn" type="button" title="Save your furniture" aria-label="Save your furniture (unsaved changes)"><span class="dot"></span>Save <small>unsaved</small></button>
+<div id="exitShade"></div>
+<div id="dialogue" class="wood-frame" role="dialog" aria-live="polite" aria-labelledby="dlgName">
+  <div id="dlgPortrait" aria-hidden="true"></div>
+  <div class="body">
+    <span id="dlgName"></span>
+    <div id="dlgText"></div>
+    <div id="dlgChoices">
+      <button type="button" data-talk="chat">Chat</button>
+      <button type="button" data-talk="island">About the island</button>
+      <button type="button" data-talk="shop">I want to shop</button>
+      <button type="button" data-talk="bye">Bye</button>
+    </div>
+  </div>
+  <span id="dlgMore" aria-hidden="true">tap ▼</span>
+</div>
+<div id="shopPanel" class="wood-frame" role="dialog" aria-modal="true" aria-labelledby="shopTitle">
+  <h3 id="shopTitle"></h3>
+  <div id="shopList"></div>
+  <div class="soon">Coming soon! Buying isn't open yet.</div>
+  <button type="button" id="shopClose" title="Close" aria-label="Close"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M13 13 L35 35 M35 13 L13 35" stroke="#fbf0dc" stroke-width="7" stroke-linecap="round"/></svg></button>
+</div>
+<div id="exitPopup" class="wood-frame" role="dialog" aria-modal="true" aria-labelledby="exitTitle">
+  <h3 id="exitTitle">Exit the house?</h3>
+  <div class="note" id="exitNote"></div>
+  <div class="buttons">
+    <button type="button" class="eat hidden" id="exitSave">Save and exit</button>
+    <button type="button" class="eat" id="exitLeave">Exit</button>
+    <button type="button" class="cancel" id="exitCancel">Cancel</button>
+  </div>
+</div>
+<div id="login">
+  <form id="loginForm" autocomplete="on">
+    <h1>🏝️ Driftwood Isle</h1>
+    <p>Log in to return to your island life, or create a new account.</p>
+    <label>Name <input id="loginName" name="username" maxlength="16" autocomplete="username"></label>
+    <label>Password <input id="loginPass" name="password" type="password" maxlength="200" autocomplete="current-password"></label>
+    <div id="loginMsg" class="info">Connecting…</div>
+    <div class="buttons">
+      <button id="loginBtn" type="submit" disabled>Login</button>
+      <button id="registerBtn" type="button" class="secondary" disabled>Create Account</button>
+    </div>
+  </form>
+</div>
+<div id="coins" class="hud pill" aria-label="Coins"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20" fill="#f2c94c" stroke="#c08a10" stroke-width="3"/><circle cx="24" cy="24" r="13" fill="none" stroke="#e0a820" stroke-width="2.5"/><path d="M24 15 v18 M19 20 h10" stroke="#c08a10" stroke-width="3" stroke-linecap="round"/><circle cx="17" cy="15" r="3" fill="#fff3c0"/></svg><span id="coinText">0</span></div>
+<div id="sellPanel" class="wood-frame" role="dialog" aria-modal="true" aria-labelledby="sellTitle">
+  <div class="head"><span class="face" aria-hidden="true">🎒</span><div><h3 id="sellTitle">Bo's Traveling Trade</h3><div id="sellLine"></div></div></div>
+  <div id="sellList"></div>
+  <div class="foot"><span id="sellTotal">Total 🪙 0</span><button type="button" id="sellBtn" disabled>Sell</button></div>
+  <button type="button" id="sellClose" title="Close" aria-label="Close"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M13 13 L35 35 M35 13 L13 35" stroke="#fbf0dc" stroke-width="7" stroke-linecap="round"/></svg></button>
+</div>
+<div id="energy" class="hud pill"><span class="bolt" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M27 4 L10 27 H23 L19 44 L38 19 H25 Z" fill="#fff" stroke="#c98a10" stroke-width="3" stroke-linejoin="round"/></svg></span><span class="label"> Energy</span> <div class="track"><div class="fill" id="energyFill" style="width:100%"></div></div><span id="energyText">100</span></div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

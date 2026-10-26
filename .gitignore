@@ -1,0 +1,12 @@
+# live game data: player accounts (password hashes, login tokens) and the world save
+accounts.json
+accounts.json.tmp
+state.json
+# installed by `npm install`
+node_modules/
+# personal reference material (videos, frames, preview images)
+ref/
+rabbit_preview.png
+rabbit_reference_preview.png
+# local tool settings
+.claude/
