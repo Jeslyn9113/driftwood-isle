@@ -149,7 +149,42 @@ export const LAYOUT = {
     pier: { root: { x: -70, z: 1 }, dir: { x: -1, z: 0.12 }, len: 16 },
     hut: { x: -56, z: 7, face: 0 }, // a little beach hut with a striped awning (snacks and towels)
     tower: { x: -66, z: 9 }, // the lifeguard tower, looking out to sea
+    // the seaside festival: booths along the boardwalk ([kind, distance along it from the road's end, side: 1 north,
+    // -1 south]), string-light poles, lantern poles, benches and the stage ([s, side, distance out]); tall cabins on
+    // stilts at the back of the beach (face: their front's direction; stairs: which side, if any) joined by bridges
+    festival: {
+      booths: [['swim', 3.5, 1], ['rings', 7.5, -1], ['lantern', 11.5, 1], ['snack', 15.5, -1], ['games', 19.5, 1]],
+      poles: [1.5, 5.5, 9.5, 13.5, 17.5, 21.5],
+      lanternPoles: [[3.5, -1, 2.4], [11.5, -1, 2.4], [19.5, -1, 2.4]],
+      benches: [[1.0, -1, 4.6], [21.5, -1, 4.6]],
+      stage: [11.5, -1, 9.5],
+      cabins: [{ x: -47, z: 11.5, face: -Math.PI / 2, stairs: 1 }],
+      bridges: [],
+      volley: { x: -55, z: 18 },
+      surf: [[-51, 16], [-50.2, 16.4], [-49.4, 16.2]],
+      parasols: [[-64.5, -11.5], [-52, -14.5]],
+    },
+    // the seafood restaurant on stilts, half over the shallows on the south shore; face: the way it looks (out to sea)
+    restaurant: { x: -68.9, z: -24, face: -2.03 },
+    // banana boat rides: a jetty from the sand out into the water, Captain Lia's booth beside its root, and two motorboats
+    // (each towing a banana boat) waiting along the jetty's north side at these z lines. Their loop goes out past the
+    // swimming buoys and back; swimmers keep out of the boats' lane (x0..x1, z0..z1).
+    banana: {
+      jetty: [[-70.5, -14.8], [-82.5, -14.8]], booth: { x: -68.6, z: -10.6, face: -Math.PI / 2 },
+      boats: [-12.5, -5.4], speed: 3.9, returnSpeed: 2.2, accel: 1.6, waitMs: 10000,
+      // the drivers at the wheel, one per motorboat (the same for everyone; nothing saved)
+      drivers: ['Suri', 'Mak Jah'],
+      lane: { x0: -125, x1: -72.5, z0: -16.2, z1: 0.6 },
+    },
+    // pink dolphins out in the deep, in two little groups beyond the swimming buoys (well clear of the boats' lane)
+    dolphins: [{ x: -114, z: -32, r: 6 }, { x: -110, z: 26, r: 6 }],
+    // a little sandcastle a few steps from the waves on the north shore (face: toward the sea)
+    sandcastle: { x: -64, z: 12.6, face: -1.01 },
   },
+  // the hot air balloon park: an open meadow between the plaza and the two northern homes, a short path from the ring road
+  balloon: { x: 3, z: -30 },
+  // the bicycle stand: beside the main path from the plaza down to the pier, its front facing that path (-x)
+  rental: { x: 7.6, z: 4.2, face: -Math.PI / 2 },
   // a footpath from the island garden west over the river to the ring road (one of the three bridges)
   gardenPath: [[-11.6, 2.5], [-21.2, 2.6]],
   picnic: { x: -10.5, z: -27.5 },
@@ -232,6 +267,69 @@ export function routeAt(route, s) {
 }
 
 // ==== the island itself (browser only)
+// a smooth path through control points [[x, z], ...] (Catmull-Rom, sampled every step units), for the boats
+export function makePath(ctrl, step = 0.4) {
+  const pts = [], marks = [0];
+  for (let i = 0; i + 1 < ctrl.length; i++) {
+    const p0 = ctrl[Math.max(0, i - 1)], p1 = ctrl[i], p2 = ctrl[i + 1], p3 = ctrl[Math.min(ctrl.length - 1, i + 2)];
+    const n = Math.max(1, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / step));
+    for (let k = 0; k < n; k++) {
+      const t = k / n, t2 = t * t, t3 = t2 * t, f = (a, b, c, d) => 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (3 * b - a - 3 * c + d) * t3);
+      pts.push({ x: f(p0[0], p1[0], p2[0], p3[0]), z: f(p0[1], p1[1], p2[1], p3[1]) });
+    }
+    marks.push(pts.length);
+  }
+  const last = ctrl[ctrl.length - 1]; pts.push({ x: last[0], z: last[1] });
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
+  return { pts, cum, len: cum[cum.length - 1], at: marks.map((i) => cum[Math.min(i, cum.length - 1)]) }; // at: distance at each control point
+}
+// where along a path (distance d from its start): position and heading
+export function pathAt(path, d) {
+  const { pts, cum } = path, D = Math.max(0, Math.min(path.len, d));
+  let lo = 0, hi = cum.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= D) lo = m; else hi = m; }
+  const a = pts[lo], b = pts[hi], u = cum[hi] > cum[lo] ? (D - cum[lo]) / (cum[hi] - cum[lo]) : 0;
+  return { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u, yaw: Math.atan2(b.x - a.x, b.z - a.z) };
+}
+// a banana boat's loop, for boat bi (moored on line z): out west along its line past the buoys, wide S-curves out in
+// the deep (the south boat swings south, the north boat north, so they never meet), a sweeping turn at the far end,
+// back east and in along the lane, round to the mooring again (the towed banana starts and ends 6 units behind)
+export const BANANA_IN = 14; // the control point where a loop comes back in at the lane's mouth
+export function bananaCtrl(bi) {
+  const z = LAYOUT.beach.banana.boats[bi];
+  const far = bi === 0
+    ? [[-106, -16], [-117, -21], [-128, -16], [-139, -21], [-150, -17.5], [-154, -11.5], [-148, -7], [-137, -10.5], [-126, -6.5], [-115, -10], [-104, -7.5]]
+    : [[-106, -1.5], [-117, 4], [-128, 0], [-139, 5], [-150, 3], [-154, 9], [-147, 13], [-136, 9.5], [-125, 13.5], [-114, 9.5], [-103, 5.5]];
+  return [[-80, z], [-86, z], [-96, z], ...far, [-96, z + 5], [-88, z + 5], [-80, z + 3.6], [-75.5, z + 2.6], [-76.5, z + 0.6], [-80, z], [-86, z]];
+}
+export const bananaCourse = (bi) => makePath(bananaCtrl(bi));
+// how far along a run of length L you are t seconds after setting off at speed v0: change to cruising speed vc at
+// accel a, cruise, then brake smoothly to a stop right at the end. { d, v, done }
+export function travel(t, L, v0, vc, a) {
+  const t1 = Math.abs(vc - v0) / a, d1 = ((v0 + vc) / 2) * t1, db = (vc * vc) / (2 * a);
+  const tb = t1 + Math.max(0, L - d1 - db) / vc, T = tb + vc / a;
+  if (t <= 0) return { d: 0, v: v0, done: false };
+  if (t >= T) return { d: L, v: 0, done: true };
+  if (t < t1) { const s = Math.sign(vc - v0); return { d: Math.min(L, v0 * t + (s * a * t * t) / 2), v: v0 + s * a * t, done: false }; }
+  if (t < tb) return { d: Math.min(L, d1 + vc * (t - t1)), v: vc, done: false };
+  const u = t - tb; return { d: Math.min(L, d1 + vc * (tb - t1) + vc * u - (a * u * u) / 2), v: Math.max(0, vc - a * u), done: false };
+}
+// where a banana boat is along its loop (state 'ride' since at), or along its way home ('return')
+export function bananaRideAt(course, at, now) { const B = LAYOUT.beach.banana, r = travel((now - at) / 1000, course.len - course.at[1], 0, B.speed, B.accel); return { d: course.at[1] + r.d, v: r.v, done: r.done }; }
+export function bananaRetAt(ret, len, now) { const B = LAYOUT.beach.banana, r = travel((now - ret.at) / 1000, len - ret.d0, ret.v0 == null ? B.returnSpeed : ret.v0, B.returnSpeed, B.accel * 0.6); return { d: ret.d0 + r.d, v: r.v, done: r.done }; }
+// "get off" out on the water: ease off, swing round in a wide turn and head home along the lane. null if already on
+// the way in. The control points are rounded so they travel the network the same on every client.
+export function bananaReturnCtrl(course, bi, d) {
+  if (d >= course.at[BANANA_IN] - 2) return null;
+  const q = (k) => { const a = pathAt(course, k); return [+a.x.toFixed(2), +a.z.toFixed(2)]; };
+  const tail = bananaCtrl(bi).slice(BANANA_IN), here = pathAt(course, d), fx = Math.sin(here.yaw), fz = Math.cos(here.yaw);
+  const side = (tail[0][0] - here.x) * fz - (tail[0][1] - here.z) * fx > 0 ? 1 : -1; // turn toward home
+  const turn = [+(here.x + fx * 6 + fz * side * 6).toFixed(2), +(here.z + fz * 6 - fx * side * 6).toFixed(2)];
+  const home = Math.hypot(tail[0][0] - here.x, tail[0][1] - here.z) > 14 ? [turn] : [];
+  return [q(d - 8), q(d - 4), q(d), ...home, ...tail];
+}
+
 export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
   const C = (h) => new THREE.Color(h);
   const L = LAYOUT;
@@ -286,8 +384,9 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
   }
   function beachH(x, z) {
     const a = L.areas.beach, d = areaD(a, x, z);
-    if (d >= 1.25) return -4.5;
-    if (d >= 1) return Math.max(-0.12 - (d - 1) * 9, -4.5); // a gentle sandy shelf: wide shallows
+    if (d >= 1.6) return -4.5;
+    if (d >= 1.17) return Math.max(-0.72 - (d - 1.17) * 12, -4.5); // then the drop to deep blue water
+    if (d >= 1) return -0.12 - (d - 1) * 3.5; // a wide sandy shelf of clear turquoise shallows
     return -0.12 + smooth(1, 0.8, d) * 0.42 + smooth(0.75, 0.45, d) * (0.18 + fbm(x * 0.07 + 5, z * 0.07 + 1) * 0.4);
   }
   // which area a point belongs to, softly: the desert east of x ~40, the beach west of x ~ -40
@@ -365,7 +464,7 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
       const p = geo.attributes.position, cols = new Float32Array(p.count * 3);
       const sand = C(PALETTE.sand), wet = C(PALETTE.wetSand), under = C(0x9fd8c8), grass = C(PALETTE.grass), light = C(PALETTE.grassLight), dark = C(PALETTE.grassDark);
       const rock = C(PALETTE.rock), rockDark = C(PALETTE.rockDark), c = new THREE.Color(), g = new THREE.Color();
-      const DESERT_SAND = C(0xebc27c), DESERT_SHADE = C(0xd39b5a), BEACH_SAND = C(0xf7e6b4), BEACH_GRASS = C(0x9ccf62);
+      const DESERT_SAND = C(0xebc27c), DESERT_SHADE = C(0xd39b5a), BEACH_SAND = C(0xf7e6b4), BEACH_GRASS = C(0x9ccf62), BEACH_WET = C(0xdcc08a), BEACH_FLOOR = C(0xe9e0b8);
       for (let i = 0; i < p.count; i++) {
         const x = p.getX(i), z = p.getZ(i), h = H(x, z);
         p.setY(i, h);
@@ -376,7 +475,10 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
         // the desert's warm dunes and the beach's pale sand, blending softly into the home island's green
         const aw = areaW(x);
         if (aw.desert > 0) c.lerp(g.copy(DESERT_SAND).lerp(DESERT_SHADE, smooth(0.9, 0.3, (Math.sin(x * 0.21 + Math.sin(z * 0.12) * 2.2) + 1) / 2) * 0.5), aw.desert * smooth(-0.1, 0.12, h));
-        if (aw.beach > 0) c.lerp(g.copy(BEACH_SAND).lerp(BEACH_GRASS, smooth(0.6, 0.8, h)), aw.beach * smooth(-0.1, 0.1, h));
+        if (aw.beach > 0) {
+          if (h >= 0) c.lerp(g.copy(BEACH_SAND).lerp(BEACH_WET, smooth(0.2, 0.03, h)).lerp(BEACH_GRASS, smooth(0.6, 0.8, h)), aw.beach);
+          else c.lerp(g.copy(BEACH_FLOOR).lerp(BEACH_WET, smooth(-0.15, 0, h)).lerp(under, smooth(-0.6, -1.4, h)), aw.beach);
+        }
         if (h > -0.3) {
           const slope = Math.abs(H(x + 0.4, z) - H(x - 0.4, z)) + Math.abs(H(x, z + 0.4) - H(x, z - 0.4));
           const k = smooth(0.4, 0.8, slope);
@@ -395,16 +497,24 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
     waterGeo.rotateX(-Math.PI / 2);
     const waterBase = new Float32Array(waterGeo.attributes.position.count * 2);
     {
-      const p = waterGeo.attributes.position, cols = new Float32Array(p.count * 3);
+      const p = waterGeo.attributes.position, cols = new Float32Array(p.count * 4);
       const shallow = C(PALETTE.shallow), mid = C(PALETTE.sea), deep = C(PALETTE.deep), c = new THREE.Color();
+      const turq = C(0x5fe3d2), lagoon = C(0x2fb8d0);
       for (let i = 0; i < p.count; i++) {
         const x = p.getX(i), z = p.getZ(i);
         waterBase[i * 2] = x; waterBase[i * 2 + 1] = z;
         const depth = Math.abs(x) < 150 && Math.abs(z) < 90 ? -H(x, z) : 6;
         c.copy(shallow).lerp(mid, smooth(0.1, 1.5, depth)).lerp(deep, smooth(1.5, 4.3, depth));
-        cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
+        let a = 1;
+        const bw = Math.abs(x) < 150 && Math.abs(z) < 90 ? areaW(x).beach * smooth(1.75, 1.3, areaD(L.areas.beach, x, z)) : 0;
+        if (bw > 0) {
+          const b = turq.clone().lerp(lagoon, smooth(0.35, 1.1, depth)).lerp(deep, smooth(1.4, 4.3, depth));
+          c.lerp(b, bw);
+          a = lerp(1, lerp(0.62, 1, smooth(0.3, 1.6, depth)), bw); // clear over the sand, so the floor shows through
+        }
+        cols[i * 4] = c.r; cols[i * 4 + 1] = c.g; cols[i * 4 + 2] = c.b; cols[i * 4 + 3] = a;
       }
-      waterGeo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+      waterGeo.setAttribute('color', new THREE.BufferAttribute(cols, 4));
     }
     const waterMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.18, metalness: 0.05, flatShading: true, transparent: true, opacity: 0.8 });
     const water = new THREE.Mesh(waterGeo, waterMat);
@@ -510,6 +620,42 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
       return m;
     })();
     foamEvent.uniforms.uAlpha.value = 0;
+    const caustics = (() => {
+      const a = L.areas.beach, x0 = a.x - a.rx * 1.75, x1 = a.x + a.rx * 0.6, z0 = a.z - a.rz * 1.6, z1 = a.z + a.rz * 1.6, step = 0.5;
+      const nx = Math.round((x1 - x0) / step), nz = Math.round((z1 - z0) / step), pos = [], dep = [], idx = [];
+      const keep = new Uint8Array((nx + 1) * (nz + 1));
+      for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
+        const x = x0 + i * step, z = z0 + j * step, h = H(x, z), k = j * (nx + 1) + i;
+        pos.push(x, h + 0.035, z); dep.push(-h);
+        keep[k] = h < 0.02 && h > -1.3 && areaW(x).beach > 0.3 ? 1 : 0;
+      }
+      for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+        const k = j * (nx + 1) + i;
+        if (keep[k] || keep[k + 1] || keep[k + nx + 1] || keep[k + nx + 2]) idx.push(k, k + nx + 1, k + 1, k + 1, k + nx + 1, k + nx + 2);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('aDepth', new THREE.Float32BufferAttribute(dep, 1));
+      g.setIndex(idx);
+      const m = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uTime: { value: 0 }, uTint: { value: new THREE.Color(1, 1, 1) }, uDay: { value: 1 } },
+        vertexShader: 'attribute float aDepth; varying float vD; varying vec2 vP; void main(){ vD = aDepth; vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: `
+          uniform float uTime; uniform vec3 uTint; uniform float uDay; varying float vD; varying vec2 vP;
+          float cell(vec2 p){ vec2 q = p + vec2(sin(p.y * 1.3 + uTime * 0.7), cos(p.x * 1.1 - uTime * 0.6)) * 0.45;
+            return abs(sin(q.x * 1.9) * sin(q.y * 1.9)); }
+          void main(){
+            vec2 p = vP * 0.9;
+            float c = pow(1.0 - cell(p), 6.0) + pow(1.0 - cell(p * 1.37 + 5.0), 6.0) * 0.7; // soft bright webs
+            float a = smoothstep(-0.02, 0.12, vD) * (1.0 - smoothstep(0.7, 1.25, vD));
+            gl_FragColor = vec4(vec3(0.75, 1.0, 0.95) * uTint * c * a * 0.32 * (0.35 + 0.65 * uDay), 1.0);
+            #include <colorspace_fragment>
+          }`,
+      });
+      const cm = new THREE.Mesh(g, m); cm.renderOrder = -1; cm.frustumCulled = true; scene.add(cm);
+      return m;
+    })();
     // misty islands on the horizon (top left and top right in the painting)
     for (const [th, s] of [[-2.3, 1], [-1.9, 0.6], [-0.55, 0.55], [-0.2, 0.4]]) {
       const hill = new THREE.Mesh(new THREE.SphereGeometry(60, 12, 8, 0, TAU, 0, Math.PI / 2), mat('#6d9a90'));
@@ -518,7 +664,7 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
       hill.lookAt(0, -2, 0);
       scene.add(hill);
     }
-    return { terrain, water, waterGeo, waterBase, waterMat, farSea, foamA, foamB, foamEvent, waveY, riverMat: river };
+    return { terrain, water, waterGeo, waterBase, waterMat, farSea, foamA, foamB, foamEvent, waveY, riverMat: river, causticsMat: caustics };
   }
 
   // ---- the scenery: town decor buildings, lighthouse, pond, rocks, plants, boats at sea
@@ -932,13 +1078,14 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
       placeIn(14, () => { const r = mesh(new THREE.DodecahedronGeometry(rr(0.5, 1.2), 0), redRock); r.scale.y = rr(0.5, 0.9); r.rotation.y = rr(0, TAU); return r; }, 0.8, 1.6);
     }
     // ---- the beach: palms, striped umbrellas with beach chairs, the boardwalk planks
+    const beachPalms = [], palmShadows = [], beachInfo = { reefs: [] };
     {
       const B = L.areas.beach, inB = (x, z, lo = 0.12, hi = 2) => areaD(B, x, z) < 0.95 && rawH(x, z) > lo && rawH(x, z) < hi;
       let n = 0;
       for (let k = 0; k < 2000 && n < 13; k++) {
         const x = B.x + rr(-B.rx, B.rx), z = B.z + rr(-B.rz, B.rz);
         if (!inB(x, z, 0.15, 0.7) || blocked(x, z, 1.6)) continue;
-        const pm = makePalm(); place(pm, x, z, 0.4, 1.6); palms.push(pm); swayers.push({ o: pm.userData.sway, ph: rand() * TAU }); n++;
+        const pm = makePalm(); place(pm, x, z, 0.4, 1.6); palms.push(pm); beachPalms.push(pm); swayers.push({ o: pm.userData.sway, ph: rand() * TAU }); n++;
       }
       const stripes = [['#f29ab8', '#fbf0dc'], ['#6fd3d0', '#fbf0dc'], ['#f2c94c', '#ffffff'], ['#8fc0f0', '#ffffff']];
       n = 0;
@@ -949,15 +1096,27 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
         g.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.2, 5), M.white, 0, 1.1, 0));
         const geo = new THREE.ConeGeometry(1.25, 0.5, 8, 1, true); geo.clearGroups(); for (let i = 0; i < 8; i++) geo.addGroup(i * 6, 6, i % 2);
         const top = new THREE.Mesh(geo, [mat(c1, { side: THREE.DoubleSide }), mat(c2, { side: THREE.DoubleSide })]); top.position.y = 2.2; top.castShadow = true; g.add(top);
+        const pair = { g, top, chairs: [] }; (beachInfo.loungers = beachInfo.loungers || []).push(pair);
         for (const side of [-1, 1]) { // two loungers
-          const ch = new THREE.Group(); ch.position.set(side * 1.2, 0, 0.8); ch.rotation.y = side * 0.2; g.add(ch);
+          const ch = new THREE.Group(); pair.chairs.push(ch); ch.position.set(side * 1.2, 0, 0.8); ch.rotation.y = side * 0.2; g.add(ch);
           ch.add(mesh(new THREE.BoxGeometry(0.6, 0.06, 1.3), mat(c1), 0, 0.3, 0));
           const back = mesh(new THREE.BoxGeometry(0.6, 0.06, 0.6), mat(c1), 0, 0.5, -0.75); back.rotation.x = 0.7; ch.add(back);
           for (const lz of [-0.5, 0.5]) for (const lx of [-0.25, 0.25]) ch.add(mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 4), M.white, lx, 0.15, lz));
         }
         g.rotation.y = rr(0, TAU);
+        { // turn the pair to face the sea (the nearest open water), so whoever lies on them gets the view
+          let best = 99, seaA = g.rotation.y;
+          for (let a = 0; a < TAU; a += TAU / 24) for (let d = 1; d < Math.min(best, 30); d += 0.5) if (rawH(x + Math.sin(a) * d, z + Math.cos(a) * d) < 0) { if (d < best) { best = d; seaA = a; } break; }
+          // as close to facing the sea as keeps both loungers on dry sand
+          const dry = (a, f) => [-1, 1].every((sd) => rawH(x + sd * 1.2 * Math.cos(a) + f * 1.3 * Math.sin(a), z - sd * 1.2 * Math.sin(a) + f * 1.3 * Math.cos(a)) > 0.15);
+          let done = best >= 99;
+          for (const off of [0, 0.25, -0.25, 0.5, -0.5, 0.8, -0.8]) if (!done && dry(seaA + off, 1)) { g.rotation.y = seaA + off; done = true; }
+          if (!done && dry(seaA, -1)) { // right by the water: the loungers go on the land side of the parasol, still facing the sea
+            g.rotation.y = seaA; for (const ch of pair.chairs) ch.position.z = -0.8;
+          }
+        }
         place(g, x, z, 0.3, 2.2);
-        colliders.push({ x: x + Math.cos(-g.rotation.y) * 1.2, z: z + Math.sin(-g.rotation.y) * 1.2, r: 0.45 }, { x: x - Math.cos(-g.rotation.y) * 1.2, z: z - Math.sin(-g.rotation.y) * 1.2, r: 0.45 });
+        for (const ch of pair.chairs) { const c = Math.cos(g.rotation.y), sn = Math.sin(g.rotation.y), lx = ch.position.x, lz = ch.position.z; colliders.push({ x: x + lx * c + lz * sn, z: z - lx * sn + lz * c, r: 0.5 }); } // each lounger
         n++;
       }
       // a little beach hut: a white-and-teal box with a striped awning and a surfboard leaning on it
@@ -987,6 +1146,98 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
         g.rotation.y = -Math.PI / 2; // looking west, out to sea
         place(g, t.x, t.z, 1.4, 2.6);
       }
+      // everything new here uses its own little random sequence, so the rest of the island stays exactly as it was
+      let seed = 917331;
+      const br = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+      const brr = (a0, b0) => a0 + br() * (b0 - a0), bpick = (arr) => arr[Math.floor(br() * arr.length)];
+      const nearBeach = (x, z) => areaW(x).beach > 0.6 && areaD(B, x, z) < 1.5;
+      const rockM = mat('#a39d94'), rockM2 = mat('#8e9a95'), coralCols = ['#ff8fb8', '#b48ce8', '#f6d55c', '#4fd1c5', '#ff9f7a'];
+      const coralPiece = (g, kind, col, x, y, z, k) => {
+        const cm = mat(col);
+        if (kind === 0) { // branching coral: a little bunch of rounded fingers
+          for (let i = 0; i < 4; i++) { const a = i * 1.6 + k, f = mesh(new THREE.CylinderGeometry(0.035, 0.06, 0.34, 5), cm, x + Math.cos(a) * 0.07, y + 0.15, z + Math.sin(a) * 0.07); f.rotation.set(Math.sin(a) * 0.5, 0, Math.cos(a) * 0.5); g.add(f); g.add(mesh(new THREE.SphereGeometry(0.045, 5, 4), cm, x + Math.cos(a) * 0.15, y + 0.31, z + Math.sin(a) * 0.15)); }
+        } else if (kind === 1) { // brain coral: a squashed ball
+          const b = mesh(new THREE.IcosahedronGeometry(0.2, 1), cm, x, y + 0.08, z); b.scale.y = 0.65; g.add(b);
+        } else if (kind === 2) { // fan coral: a flat round fan
+          const f = mesh(new THREE.CircleGeometry(0.24, 7), mat(col, { side: THREE.DoubleSide }), x, y + 0.24, z); f.rotation.y = k; g.add(f);
+          g.add(mesh(new THREE.CylinderGeometry(0.02, 0.025, 0.12, 4), cm, x, y + 0.05, z));
+        } else { // a sea plant: tall thin blades
+          for (let i = 0; i < 3; i++) { const bl = mesh(new THREE.ConeGeometry(0.04, brr(0.4, 0.7), 4), mat('#5cbf7a'), x + (i - 1) * 0.06, y + 0.22, z); bl.rotation.z = (i - 1) * 0.25; g.add(bl); }
+        }
+      };
+      const reefs = [];
+      for (let k = 0, n = 0; k < 3000 && n < 8; k++) { // rocks in the shallows, covered in coral
+        const x = B.x + brr(-B.rx * 1.6, B.rx * 0.4), z = B.z + brr(-B.rz * 1.5, B.rz * 1.5), h = rawH(x, z);
+        if (!nearBeach(x, z) || h > -0.2 || h < -0.65 || blocked(x, z, 2.4) || reefs.some((r) => Math.hypot(r.x - x, r.z - z) < 6)) continue;
+        const sc = brr(0.8, 1.3), g = new THREE.Group();
+        const base = mesh(new THREE.DodecahedronGeometry(0.75 * sc, 0), n % 2 ? rockM : rockM2, 0, 0.15, 0); base.scale.set(1.2, 0.75, 1); base.rotation.y = brr(0, TAU); g.add(base);
+        const top = 0.15 + 0.55 * sc;
+        for (let i = 0; i < 6; i++) { const a = i * 1.05 + brr(0, 0.6), r = 0.35 * sc * (i % 3 === 0 ? 0.2 : 1); coralPiece(g, i % 4, bpick(coralCols), Math.cos(a) * r, top - 0.12 - (r > 0.1 ? 0.1 : 0), Math.sin(a) * r, a); }
+        for (let i = 0; i < 3; i++) { const a = brr(0, TAU), r = 0.95 * sc; coralPiece(g, i === 0 ? 3 : bpick([0, 1, 3]), bpick(coralCols), Math.cos(a) * r, -0.05, Math.sin(a) * r, a); }
+        g.position.set(x, h, z); scene.add(g);
+        colliders.push({ x, z, r: 0.85 * sc }); avoid.push({ x, z, r: 1.6 * sc });
+        reefs.push({ x, z, r: 0.85 * sc }); n++;
+      }
+      for (let k = 0, n = 0; k < 2000 && n < 5; k++) { // a few big smooth rocks on the sand
+        const x = B.x + brr(-B.rx, B.rx * 0.5), z = B.z + brr(-B.rz, B.rz), h = rawH(x, z);
+        if (!nearBeach(x, z) || h < 0.08 || h > 0.45 || blocked(x, z, 1.5)) continue;
+        const sc = brr(0.7, 1.2), r = mesh(new THREE.DodecahedronGeometry(0.8 * sc, 1), rockM, 0, 0.3 * sc, 0); r.scale.set(1.3, 0.7, 1); r.rotation.y = brr(0, TAU);
+        const g = new THREE.Group(); g.add(r); g.position.set(x, h - 0.05, z); scene.add(g);
+        colliders.push({ x, z, r: 0.9 * sc }); avoid.push({ x, z, r: 1.4 * sc }); n++;
+      }
+      { // pebbles by the water's edge and seagrass in the shallows (instanced: cheap however many)
+        const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sv = new THREE.Vector3();
+        const pebbles = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.08, 0), mat('#c9c2b6'), 70);
+        const grass = new THREE.InstancedMesh(new THREE.ConeGeometry(0.05, 0.5, 4), mat('#4fb37a'), 90);
+        let np = 0, ng = 0;
+        for (let k = 0; k < 6000 && (np < 70 || ng < 90); k++) {
+          const x = B.x + brr(-B.rx * 1.6, B.rx * 0.5), z = B.z + brr(-B.rz * 1.5, B.rz * 1.5), h = rawH(x, z);
+          if (!nearBeach(x, z) || blocked(x, z, 0.3)) continue;
+          if (np < 70 && h > -0.15 && h < 0.25) { e.set(brr(0, 3), brr(0, 3), 0); sv.set(1, 0.6, 1).multiplyScalar(brr(0.6, 1.6)); pebbles.setMatrixAt(np++, m4.compose(v.set(x, h + 0.02, z), q.setFromEuler(e), sv)); }
+          else if (ng < 90 && h < -0.2 && h > -0.7) { const cx = x, cz = z; for (let i = 0; i < 3 && ng < 90; i++) { e.set(brr(-0.3, 0.3), 0, brr(-0.3, 0.3)); sv.set(1, brr(0.7, 1.3), 1); grass.setMatrixAt(ng++, m4.compose(v.set(cx + brr(-0.15, 0.15), h + 0.2, cz + brr(-0.15, 0.15)), q.setFromEuler(e), sv)); } }
+        }
+        pebbles.count = np; grass.count = ng; pebbles.castShadow = false;
+        scene.add(pebbles, grass);
+      }
+      // soft palm shadows on the sand: a frond-shaped shadow under every beach palm, gently swaying with it
+      if (typeof document !== 'undefined') {
+        const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+        const c2 = cv.getContext('2d');
+        if (c2 && c2.translate) {
+          c2.translate(64, 64); c2.fillStyle = 'rgba(0,0,0,1)';
+          for (let i = 0; i < 7; i++) { c2.rotate(TAU / 7); c2.beginPath(); c2.ellipse(30, 0, 30, 8, 0, 0, TAU); c2.fill(); }
+          c2.beginPath(); c2.arc(0, 0, 10, 0, TAU); c2.fill();
+        }
+        const tex = new THREE.CanvasTexture(cv);
+        const shM = new THREE.MeshBasicMaterial({ map: tex, color: 0x3a2a10, transparent: true, opacity: 0.2, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+        for (const pm of beachPalms) {
+          const sh = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 4.2), shM); sh.rotation.x = -Math.PI / 2; sh.rotation.z = brr(0, TAU);
+          const x = pm.position.x + 1.1, z = pm.position.z + 0.7;
+          sh.position.set(x, Math.max(rawH(x, z), 0) + 0.04, z); sh.renderOrder = 1; scene.add(sh);
+          palmShadows.push({ o: sh, ph: brr(0, TAU) });
+        }
+      }
+      // soft lamps along the beach path (they glow at dusk and night with every other lamp)
+      if (glowTex) {
+        const bwp = L.beach.boardwalk;
+        for (let i = 0; i + 1 < bwp.length; i++) {
+          const [ax, az] = bwp[i], [bx, bz] = bwp[i + 1], len = Math.hypot(bx - ax, bz - az), nx = -(bz - az) / len, nz = (bx - ax) / len;
+          for (let u = 0.25; u < 1; u += 0.5) {
+            const side = (i + (u > 0.5 ? 1 : 0)) % 2 ? 1 : -1, x = lerp(ax, bx, u) + nx * 1.6 * side, z = lerp(az, bz, u) + nz * 1.6 * side, y = Math.max(rawH(x, z), 0);
+            if (y <= 0.05) continue;
+            const g = new THREE.Group();
+            g.add(mesh(new THREE.CylinderGeometry(0.05, 0.07, 1.5, 6), M.woodDark, 0, 0.75, 0));
+            const lan = mesh(new THREE.BoxGeometry(0.22, 0.26, 0.22), M.lantern, 0, 1.6, 0); lan.castShadow = false; g.add(lan);
+            g.add(mesh(new THREE.ConeGeometry(0.2, 0.14, 4), M.woodDark, 0, 1.8, 0));
+            g.position.set(x, y, z); scene.add(g);
+            const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+            glow.position.set(x, y + 1.6, z); glow.scale.set(1.5, 1.5, 1); scene.add(glow);
+            lampData.push({ pos: glow.position.clone(), light: null, glow });
+            colliders.push({ x, z, r: 0.12 }); avoid.push({ x, z, r: 0.6 });
+          }
+        }
+      }
+      beachInfo.reefs = reefs;
       // the boardwalk: weathered planks laid across the walk from the road to the big pier
       const bw = L.beach.boardwalk, plankA = mat('#c9a06e'), plankB = mat('#b48a5a');
       for (let i = 0; i + 1 < bw.length; i++) {
@@ -1014,6 +1265,7 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
         volcano.glow.material.opacity = 0.2 + puff * 0.15 + nightGlow * 0.4;
         volcano.petalMat.color.setRGB(1, 0.72 + 0.1 * (1 - nightGlow), 0.83);
       }
+      for (const s of palmShadows) s.o.rotation.z += Math.sin(t * 0.8 + s.ph) * 0.0006; // the fronds' shadows sway a touch
       for (const c of capybaras) { // a slow look about, a nibble now and then; the soaking one bobs
         const h = c.g.userData.head;
         h.rotation.y = Math.sin(t * 0.3 + c.ph) * 0.4;
@@ -1021,7 +1273,7 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
         if (c.soaking) c.g.position.y = c.y + Math.sin(t * 0.9 + c.ph) * 0.03;
       }
     }
-    return { palms, trees, swayers, grassTufts, lighthouse, sailboats, updateSailboats, updateDesert, capybaras: () => capybaras, volcano: () => volcano };
+    return { palms, trees, swayers, grassTufts, lighthouse, sailboats, updateSailboats, updateDesert, capybaras: () => capybaras, volcano: () => volcano, beach: beachInfo };
   }
 
   return { ISLAND, HILL, POND, coastR, rockyAt, rawH, setFlats, H, landD, waterR, nearTown, riverDist, areaAt, areaW, randomInArea, buildSurface, buildScenery };

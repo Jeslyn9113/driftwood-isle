@@ -24,14 +24,19 @@ const SELL_PRICES = {
   crab: 18, // beach
   scarab: 35, // desert
   lizard: 28, // desert
+  clownfish: 22, puffer: 30, // fished off the beach
 };
 // what a fishing catch turns out to be, rolled here on the server (chances add up to 1)
 const CATCH_TABLE = [['smallfish', 0.6], ['bigfish', 0.25], ['shell', 0.075], ['star', 0.075]];
+// fishing from the beach (the same test as atBeach in main.js) adds the beach's own catches
+const BEACH_CATCH_TABLE = [['smallfish', 0.33], ['clownfish', 0.22], ['puffer', 0.15], ['bigfish', 0.13], ['crab', 0.1], ['star', 0.07]];
+const BEACH_AREA = require('./island.js').LAYOUT.areas.beach;
+const atBeach = (p) => Number.isFinite(p.x) && p.x < -43 && ((p.x - BEACH_AREA.x) / BEACH_AREA.rx) ** 2 + ((p.z - BEACH_AREA.z) / BEACH_AREA.rz) ** 2 < 2.56;
 const START_COINS = 50; // every account starts with these (older accounts get them the first time they log in)
 const ROOT = __dirname;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json' };
 const TREE_REGROW_MS = 90000; // matches the client
-const PROTOCOL = 8; // bump with every change to the messages; must equal PROTOCOL in main.js
+const PROTOCOL = 9; // bump with every change to the messages; must equal PROTOCOL in main.js
 const PUBLIC = new Set(['/index.html', '/main.js', '/island.js', '/lib/three.module.js']);
 
 const server = http.createServer((req, res) => {
@@ -118,7 +123,9 @@ function spend(p, cost) {
 // ---------------------------------------------------------------- plaza seats: two on each bench, two on the swing
 // seat ids match the client: 0-1 left bench, 2-3 swing, 4-5 right bench. The swing's motion is computed by every
 // client from this small state and the shared clock (same formula as swingAmp / swingAngle in main.js).
-const SEAT_COUNT = 6, SWING_SEATS = [2, 3];
+// 6-29: the 24 chairs of the seaside restaurant (six tables of four, in the client's order)
+// 30-45: the beach seats: six pairs of loungers under parasols (12), then the festival's two benches (4)
+const SEAT_COUNT = 6 + 24 + 12 + 4, SWING_SEATS = [2, 3];
 const SWING = { RAMP: 2000, DECAY: 1500 };
 const seats = new Map(); // seat id -> player id
 const swing = { occupied: false, phase0: 0, occAt: 0, ampStart: 0, stop: 0, ampStop: 0 };
@@ -145,6 +152,79 @@ function leaveRides(p) {
   for (const m of Object.values(rideOcc)) for (const [k, o] of m) if (o.id === p.id) { m.delete(k); changed = true; }
   return changed;
 }
+// ---- bicycles: free from Rex's stand, one per player, never saved. The server owns where each one is: the rider's
+// client sends where it rode to (checked against a top speed so nobody teleports), everyone else is told.
+const RENTAL = require('./island.js').LAYOUT.rental;
+const BIKE = { maxSpeed: 7.5, idleMs: 10 * 60 * 1000, colors: ['#9be0c0', '#f6b8d0', '#8fc0f0', '#f2e28a', '#c9a6ff'] };
+const bikes = new Map(); // owner player id -> { id, owner, name, color, x, z, h, riding, at, lastRide }
+const bikePub = (b) => ({ id: b.id, owner: b.owner, name: b.name, color: b.color, x: b.x, z: b.z, h: b.h, riding: b.riding });
+function dropBike(p, how) { const b = bikes.get(p.id); if (!b) return; bikes.delete(p.id); broadcast({ t: 'bikeGone', id: b.id, how }); }
+setInterval(() => { // a bicycle nobody has ridden for 10 minutes goes back to the stand by itself
+  const now = Date.now();
+  for (const [id, b] of bikes) if (!b.riding && now - b.lastRide > BIKE.idleMs) { bikes.delete(id); broadcast({ t: 'bikeGone', id: b.id, how: 'fade' }); }
+}, 15000);
+const nearRental = (p, reach) => Number.isFinite(p.x) && !p.room && Math.hypot(p.x - RENTAL.x, p.z - RENTAL.z) <= reach;
+// ---- the hot air balloon: one basket for up to 4 players. The server keeps its state ('tied' on the pad, 'rising',
+// 'up' at the top, 'descending'), the height it had at a moment, and who stands where; every client works out the
+// height in between from the shared clock (same speeds as BALLOON in main.js). Never saved.
+const BALLOON = { pad: require('./island.js').LAYOUT.balloon, maxH: 60, up: 2.2, down: 2.8, seats: 4, reach: 6.5 };
+const balloon = { s: 'tied', h: 0, at: Date.now(), riders: [null, null, null, null], off: new Set() };
+function balloonH(now = Date.now()) {
+  const dt = (now - balloon.at) / 1000;
+  if (balloon.s === 'rising') return Math.min(BALLOON.maxH, balloon.h + BALLOON.up * dt);
+  if (balloon.s === 'descending') return Math.max(0, balloon.h - BALLOON.down * dt);
+  return balloon.h;
+}
+const balloonMsg = () => ({ t: 'balloon', s: balloon.s, h: balloon.h, at: balloon.at, riders: balloon.riders, off: [...balloon.off] });
+function balloonSet(state) { const now = Date.now(); balloon.h = balloonH(now); balloon.s = state; balloon.at = now; }
+const balloonSpot = (id) => balloon.riders.indexOf(id);
+function balloonLeave(id) { // a passenger leaves (or disconnects): their spot is free again
+  const i = balloonSpot(id);
+  if (i < 0) return false;
+  balloon.riders[i] = null; balloon.off.delete(id);
+  return true;
+}
+setInterval(() => { // reaching the top, landing, and coming down by itself when nobody is aboard
+  let changed = false;
+  const h = balloonH(), aboard = balloon.riders.filter((r) => r !== null);
+  if (balloon.s === 'rising' && h >= BALLOON.maxH) { balloonSet('up'); changed = true; }
+  if (balloon.s === 'descending' && h <= 0) { // landed: back on its ropes, and whoever wanted off steps out
+    balloonSet('tied'); balloon.h = 0;
+    for (const id of [...balloon.off]) balloonLeave(id);
+    changed = true;
+  }
+  if ((balloon.s === 'rising' || balloon.s === 'up') && (!aboard.length || aboard.every((id) => balloon.off.has(id)))) { balloonSet('descending'); changed = true; }
+  if (changed) broadcast(balloonMsg());
+}, 150);
+// ---- banana boat rides: each motorboat waits at the jetty ('wait'), tows its banana boat round the loop ('ride'), or
+// heads back early because someone wants off ('return'). Where a boat is comes from its state and the shared clock
+// (clients use the same paths from island.js), so only boarding and state changes go over the network. Never saved.
+const { makePath, bananaCourse, bananaRideAt, bananaRetAt, bananaReturnCtrl } = require('./island.js');
+const BANANA = require('./island.js').LAYOUT.beach.banana;
+const bananas = BANANA.boats.map((z, bi) => ({ z, bi, driver: BANANA.drivers[bi], course: bananaCourse(bi), s: 'wait', riders: [null, null, null, null, null, null], first: 0, at: 0, ret: null }));
+const bananaMsg = () => ({ t: 'banana', now: Date.now(), boats: bananas.map((b) => ({ driver: b.driver, s: b.s, riders: b.riders, first: b.first, at: b.at, ret: b.ret && { ctrl: b.ret.ctrl, at: b.ret.at, d0: b.ret.d0, v0: b.ret.v0 } })) });
+function bananaFinish(b) { b.s = 'wait'; b.riders.fill(null); b.first = 0; b.at = 0; b.ret = null; }
+function bananaReturn(b, now) { // back to the jetty from wherever it is: on along the lane, slower
+  const r = bananaRideAt(b.course, b.at, now), ctrl = bananaReturnCtrl(b.course, b.bi, r.d);
+  if (!ctrl) return; // already on the way in: just finish the loop
+  const path = makePath(ctrl);
+  b.s = 'return'; b.ret = { ctrl, at: now, d0: path.at[2], len: path.len, v0: +r.v.toFixed(3) }; // slows down smoothly from here
+}
+const bananaSeatOf = (id) => { for (let i = 0; i < bananas.length; i++) { const k = bananas[i].riders.indexOf(id); if (k >= 0) return { boat: i, seat: k }; } return null; };
+const nearJetty = (p) => { const [[ax, az], [bx, bz]] = BANANA.jetty; if (!Number.isFinite(p.x) || p.room) return false; const t = Math.max(0, Math.min(1, ((p.x - ax) * (bx - ax) + (p.z - az) * (bz - az)) / ((bx - ax) ** 2 + (bz - az) ** 2))); return Math.hypot(p.x - (ax + (bx - ax) * t), p.z - (az + (bz - az) * t)) <= 10; };
+setInterval(() => {
+  const now = Date.now();
+  let changed = false;
+  for (const b of bananas) {
+    const aboard = b.riders.some((r) => r !== null);
+    if (b.s === 'wait' && aboard && now - b.first >= BANANA.waitMs) { b.s = 'ride'; b.at = now; changed = true; }
+    else if (b.s === 'ride' && bananaRideAt(b.course, b.at, now).done) { bananaFinish(b); changed = true; }
+    else if (b.s === 'ride' && !aboard) { bananaReturn(b, now); changed = true; } // an empty boat heads home to rest
+    else if (b.s === 'return' && bananaRetAt(b.ret, b.ret.len, now).done) { bananaFinish(b); changed = true; }
+  }
+  if (changed) broadcast(bananaMsg());
+}, 200);
+const DOLPHIN_SEED = Math.floor(Math.random() * 1e9); // the dolphins' shared jump schedule
 const wheelAngle = (t) => ((t % RIDES.ferris.periodMs) / RIDES.ferris.periodMs) * Math.PI * 2;
 // boards p onto a ride; returns '' when it worked, or the reason it didn't
 function boardRide(p, kind, want) {
@@ -270,7 +350,7 @@ function writeAccounts() {
 setInterval(() => { for (const p of players.values()) storeProgress(p); writeAccounts(); }, 30000); // autosave
 
 const TOOLS = new Set(['axe', 'can', 'rod', 'net']);
-const POCKET_KINDS = ['shell', 'star', 'coconut', 'mango', 'pineapple', 'smallfish', 'bigfish', 'carrot', 'tomato', 'cabbage', 'flower', 'butterfly', 'beetle', 'dragonfly', 'scarab', 'lizard', 'crab', 'conch'];
+const POCKET_KINDS = ['shell', 'star', 'coconut', 'mango', 'pineapple', 'smallfish', 'bigfish', 'carrot', 'tomato', 'cabbage', 'flower', 'butterfly', 'beetle', 'dragonfly', 'scarab', 'lizard', 'crab', 'conch', 'clownfish', 'puffer'];
 const NAME_RE = /^[A-Za-z0-9 _.-]{3,16}$/;
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const scrypt = (password, salt) => new Promise((resolve, reject) => crypto.scrypt(password, salt, 64, (err, key) => (err ? reject(err) : resolve(key))));
@@ -299,7 +379,7 @@ function storeProgress(p) {
 const wss = new WebSocketServer({ server });
 function send(ws, msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); }
 function broadcast(msg, except) { const s = JSON.stringify(msg); for (const ws of players.keys()) if (ws !== except && ws.readyState === 1) ws.send(s); }
-const pub = (p) => ({ id: p.id, name: p.name, color: p.color, x: p.x, z: p.z, h: p.h, m: p.m, room: p.room || null });
+const pub = (p) => ({ id: p.id, name: p.name, color: p.color, x: p.x, z: p.z, y: p.y ?? null, h: p.h, m: p.m, room: p.room || null });
 
 // ---------------------------------------------------------------- house rooms
 // p.room is the plot number of the house a player is inside (null on the island). A room takes 8 at most.
@@ -422,7 +502,7 @@ wss.on('connection', (ws) => {
       gardens: gardenList(),
       islandWatered, islandHarvested,
       garden: { growMs: GARDEN_GROW_MS, wetMs: GARDEN_WET_MS },
-      seats: [...seats.entries()], swing, rides: ridesMsg(),
+      seats: [...seats.entries()], swing, rides: ridesMsg(), bikes: [...bikes.values()].map(bikePub), balloon: balloonMsg(), banana: bananaMsg(), dolphinSeed: DOLPHIN_SEED,
       bo: boMsg(), sellPrices: SELL_PRICES,
     });
     if (newHouse) broadcast({ t: 'house', plot: acc.plot, name: acc.name, roof: acc.roof }, ws);
@@ -539,6 +619,81 @@ wss.on('connection', (ws) => {
       const why = boardRide(p, msg.ride, msg.seat);
       send(ws, { t: 'rideResult', ok: !why, msg: why });
       broadcast(ridesMsg());
+    } else if (msg.t === 'bikeBorrow') { // from Rex: a free bicycle in the colour you picked, right beside you
+      const have = bikes.get(p.id);
+      if (have) return send(ws, { t: 'bikeResult', ok: false, why: 'have', x: have.x, z: have.z });
+      if (!nearRental(p, 7)) return send(ws, { t: 'bikeResult', ok: false, why: 'far' });
+      const b = { id: p.id, owner: p.id, name: p.name, color: BIKE.colors.includes(msg.color) ? msg.color : BIKE.colors[0], x: p.x + 1.1, z: p.z + 0.4, h: 0, riding: false, at: Date.now(), lastRide: Date.now() };
+      bikes.set(p.id, b);
+      send(ws, { t: 'bikeResult', ok: true, why: 'borrowed' });
+      broadcast({ t: 'bike', bike: bikePub(b) });
+    } else if (msg.t === 'bikeReturn') { // back to Rex (from wherever it's parked): it rolls home to the stand
+      const b = bikes.get(p.id);
+      if (!b) return send(ws, { t: 'bikeResult', ok: false, why: 'none' });
+      if (b.riding) return send(ws, { t: 'bikeResult', ok: false, why: 'riding' });
+      if (!nearRental(p, 7)) return send(ws, { t: 'bikeResult', ok: false, why: 'far' });
+      dropBike(p, 'return');
+      send(ws, { t: 'bikeResult', ok: true, why: 'returned' });
+    } else if (msg.t === 'bikeMount') { // only your own bicycle, only when you're standing by it
+      const b = bikes.get(p.id);
+      if (!b || b.riding || p.room || balloonSpot(p.id) >= 0 || !Number.isFinite(p.x) || Math.hypot(p.x - b.x, p.z - b.z) > 3.5) return send(ws, { t: 'bikeResult', ok: false, why: 'mount' });
+      if ([...seats.values()].includes(p.id)) { setSeat(p, null); broadcast(seatsMsg()); }
+      if (leaveRides(p)) broadcast(ridesMsg());
+      b.riding = true; b.at = Date.now();
+      broadcast({ t: 'bike', bike: bikePub(b) });
+    } else if (msg.t === 'bikeMove') { // where the rider got to: no faster than the top speed, inside the world
+      const b = bikes.get(p.id), x = Number(msg.x), z = Number(msg.z), h = Number(msg.h), now = Date.now();
+      if (!b || !b.riding || !Number.isFinite(x) || !Number.isFinite(z)) return;
+      const dt = Math.min(2, (now - b.at) / 1000), d = Math.hypot(x - b.x, z - b.z);
+      if (d > BIKE.maxSpeed * dt + 0.6 || Math.abs(x) > 150 || Math.abs(z) > 90) { b.at = now; return send(ws, { t: 'bikeFix', x: b.x, z: b.z, h: b.h }); }
+      b.x = x; b.z = z; b.h = Number.isFinite(h) ? h : b.h; b.at = now; b.lastRide = now;
+      p.x = x; p.z = z; // the rider is where the bicycle is
+      broadcast({ t: 'bikeMove', id: b.id, x, z, h: b.h }, ws);
+    } else if (msg.t === 'bikeDismount') {
+      const b = bikes.get(p.id);
+      if (!b || !b.riding) return;
+      b.riding = false; b.lastRide = Date.now();
+      broadcast({ t: 'bike', bike: bikePub(b) });
+    } else if (msg.t === 'bananaBoard') { // a free seat on a waiting banana boat, from the jetty
+      const bi = msg.boat, si = msg.seat, b = bananas[bi], bk = bikes.get(p.id);
+      if (!Number.isInteger(bi) || !b || !Number.isInteger(si) || si < 0 || si > 5 || bananaSeatOf(p.id)) return;
+      const why = b.s !== 'wait' ? 'away' : b.riders[si] !== null ? 'taken' : !nearJetty(p) ? 'far' : balloonSpot(p.id) >= 0 ? 'balloon' : bk && bk.riding ? 'bike' : null;
+      if (why) return send(ws, { t: 'bananaResult', ok: false, why });
+      if ([...seats.values()].includes(p.id)) { setSeat(p, null); broadcast(seatsMsg()); }
+      if (leaveRides(p)) broadcast(ridesMsg());
+      b.riders[si] = p.id; if (!b.first) b.first = Date.now();
+      broadcast(bananaMsg());
+    } else if (msg.t === 'bananaStart') { // anyone aboard a waiting boat can start it right away
+      const at = bananaSeatOf(p.id), b = at && bananas[at.boat];
+      if (!b || b.s !== 'wait') return;
+      b.s = 'ride'; b.at = Date.now(); broadcast(bananaMsg());
+    } else if (msg.t === 'bananaOff') { // at the jetty: step off; out on the water: the boat brings everyone back
+      const at = bananaSeatOf(p.id), b = at && bananas[at.boat];
+      if (!b) return;
+      if (b.s === 'wait') { b.riders[at.seat] = null; if (!b.riders.some((r) => r !== null)) b.first = 0; }
+      else if (b.s === 'ride') bananaReturn(b, Date.now());
+      broadcast(bananaMsg());
+    } else if (msg.t === 'balloonBoard') { // step into the basket: only while it's tied on the pad, with a spot free
+      if (balloonSpot(p.id) >= 0) return;
+      const b = bikes.get(p.id), near = Number.isFinite(p.x) && !p.room && Math.hypot(p.x - BALLOON.pad.x, p.z - BALLOON.pad.z) <= BALLOON.reach;
+      const free = balloon.riders.indexOf(null);
+      const why = balloon.s !== 'tied' ? 'flying' : free < 0 ? 'full' : !near ? 'far' : b && b.riding ? 'bike' : bananaSeatOf(p.id) ? 'banana' : null;
+      if (why) return send(ws, { t: 'balloonResult', ok: false, why });
+      if ([...seats.values()].includes(p.id)) { setSeat(p, null); broadcast(seatsMsg()); }
+      if (leaveRides(p)) broadcast(ridesMsg());
+      balloon.riders[free] = p.id;
+      broadcast(balloonMsg());
+    } else if (msg.t === 'balloonUp') { // anyone aboard can start the climb (not while someone is waiting to get off)
+      if (balloonSpot(p.id) < 0 || !(balloon.s === 'tied' || (balloon.s === 'descending' && !balloon.off.size))) return;
+      balloonSet('rising'); broadcast(balloonMsg());
+    } else if (msg.t === 'balloonDown') {
+      if (balloonSpot(p.id) < 0 || !(balloon.s === 'rising' || balloon.s === 'up')) return;
+      balloonSet('descending'); broadcast(balloonMsg());
+    } else if (msg.t === 'balloonOff') { // on the pad: step straight out; in the air: get out once it has landed
+      if (balloonSpot(p.id) < 0) return;
+      if (balloon.s === 'tied') balloonLeave(p.id);
+      else balloon.off.add(p.id);
+      broadcast(balloonMsg());
     } else if (msg.t === 'rideOff') {
       // the merry-go-round lets you off any time; the Ferris wheel only at the end of its turn
       for (const [k, o] of rideOcc.carousel) if (o.id === p.id) rideOcc.carousel.delete(k);
@@ -605,8 +760,9 @@ wss.on('connection', (ws) => {
       let kind = null;
       if (age >= 3000 && age <= 13000) {
         let r = Math.random();
-        kind = CATCH_TABLE[CATCH_TABLE.length - 1][0];
-        for (const [k, chance] of CATCH_TABLE) { if (r < chance) { kind = k; break; } r -= chance; }
+        const table = atBeach(p) && !p.room ? BEACH_CATCH_TABLE : CATCH_TABLE;
+        kind = table[table.length - 1][0];
+        for (const [k, chance] of table) { if (r < chance) { kind = k; break; } r -= chance; }
         p.pocket[kind]++;
       }
       send(ws, { t: 'fishResult', kind });
@@ -626,7 +782,8 @@ wss.on('connection', (ws) => {
       const first = !p.announced;
       p.announced = true;
       p.x = x; p.z = z; p.h = Number.isFinite(h) ? h : 0; p.m = msg.m ? 1 : 0;
-      broadcast(first ? { t: 'join', p: pub(p) } : { t: 'move', id: p.id, x, z, h: p.h, m: p.m }, ws);
+      const y = Number(msg.y); p.y = Number.isFinite(y) && y > -1 && y < 12 ? y : null; // up on a beach cabin's balcony or bridge
+      broadcast(first ? { t: 'join', p: pub(p) } : { t: 'move', id: p.id, x, z, h: p.h, m: p.m, y: p.y }, ws);
     } else if (msg.t === 'pick') {
       const id = Number(msg.item);
       if (!Number.isInteger(id) || id < 0 || id > 10000) return;
@@ -673,6 +830,9 @@ wss.on('connection', (ws) => {
     bo.holds.delete(p.id);
     if ([...seats.values()].includes(p.id)) { setSeat(p, null); broadcast(seatsMsg()); }
     if (leaveRides(p)) broadcast(ridesMsg()); // a rider who disconnects frees the seat
+    dropBike(p, 'fade'); // their bicycle fades away
+    if (balloonLeave(p.id)) broadcast(balloonMsg()); // and their spot in the balloon is free
+    { const at = bananaSeatOf(p.id); if (at) { bananas[at.boat].riders[at.seat] = null; if (bananas[at.boat].s === 'wait' && !bananas[at.boat].riders.some((r) => r !== null)) bananas[at.boat].first = 0; broadcast(bananaMsg()); } }
     broadcast({ t: 'leave', id: p.id });
     broadcast({ t: 'count', n: players.size });
   });

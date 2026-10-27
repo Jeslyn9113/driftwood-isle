@@ -13,8 +13,9 @@
   button, input, #tools, #bagPanel, #login, #eatPopup, #exitPopup { touch-action: manipulation; }
   .hud { position: fixed; pointer-events: none; color: #5a4632; user-select: none; }
   .pill { background: rgba(255, 250, 238, 0.86); border-radius: 999px; padding: 8px 16px; box-shadow: 0 4px 14px rgba(80, 50, 20, 0.18); font-size: 15px; }
-  #clock { top: 16px; right: 16px; text-align: right; }
+  #clock { top: 16px; right: 16px; text-align: right; pointer-events: auto; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; min-height: 44px; }
   #clock small { display: block; opacity: 0.7; font-size: 12px; margin-top: 2px; }
+  #clock .tapHint { display: none; }
   #toast { bottom: 26px; left: 50%; transform: translateX(-50%) translateY(10px); opacity: 0; transition: opacity 0.6s, transform 0.6s; white-space: nowrap; }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   #players { bottom: 100px; right: 16px; font-size: 13px; }
@@ -77,7 +78,7 @@
   #energy { top: 16px; left: 16px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
   #energy .track { width: 160px; height: 12px; border-radius: 999px; background: rgba(90, 70, 50, 0.15); overflow: hidden; }
   #energy .fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #8fd16a, #ffd25a); transition: width 0.4s; }
-  @media (max-width: 600px) { #energy { gap: 6px; padding: 8px 12px; } #energy .label, #clock .keys { display: none; } #energy .track { width: 64px; } #clock { font-size: 13px; } }
+  @media (max-width: 600px) { #energy { gap: 6px; padding: 8px 12px; } #energy .label, #clock .keys { display: none; } #clock .tapHint { display: block; } #energy .track { width: 64px; } #clock { font-size: 13px; } }
   #logout { position: fixed; top: 66px; left: 16px; font: inherit; font-size: 13px; color: #5a4632; border: none; cursor: pointer; border-radius: 999px; padding: 6px 14px; background: rgba(255, 250, 238, 0.86); box-shadow: 0 4px 14px rgba(80, 50, 20, 0.18); display: none; }
   #logout.show { display: block; }
   #login { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(60, 90, 110, 0.35); backdrop-filter: blur(3px); }
@@ -191,6 +192,35 @@
   #dlgChoices button { flex: 1 1 40%; min-height: 44px; font: inherit; font-size: 15px; border: none; border-radius: 999px; cursor: pointer; color: var(--ink);
     background: linear-gradient(180deg, var(--slot), var(--slot-dark)); box-shadow: 0 3px 0 rgba(120, 85, 40, 0.35); transition: transform 0.12s; }
   #dlgChoices button:hover { transform: translateY(-1px); }
+  #dlgChoices button[hidden] { display: none; }
+  #dlgChoices button[data-talk="return"] { background: linear-gradient(180deg, #d6f0ff, #b4dcf5); }
+  #bikePanel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 30; display: none; flex-direction: column; align-items: center; gap: 12px;
+    width: min(300px, calc(100vw - 48px)); padding: 18px 16px 14px; color: var(--ink); text-align: center; user-select: none; touch-action: manipulation; }
+  #bikePanel.open { display: flex; }
+  #bikePanel h3 { margin: 0; font-size: 17px; }
+  #bikeSwatches { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+  .bike-swatch { width: 48px; height: 48px; border-radius: 50%; border: none; cursor: pointer; position: relative; box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.7), 0 3px 6px rgba(70, 40, 15, 0.3); transition: transform 0.15s; }
+  .bike-swatch:hover { transform: translateY(-2px) scale(1.05); }
+  .bike-swatch span { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); font-size: 11px; color: var(--ink); white-space: nowrap; margin-top: 2px; }
+  #bikeCancel { font: inherit; font-size: 15px; margin-top: 12px; padding: 9px 22px; border-radius: 14px; border: none; cursor: pointer; color: var(--ink); background: linear-gradient(180deg, var(--slot), var(--slot-dark)); }
+  #bikeOffBtn { display: none; width: 52px; height: 52px; align-self: flex-start; }
+  #bikeOffBtn svg { width: 28px; height: 28px; }
+  body.riding #bikeOffBtn { display: flex; }
+  body.riding #toolBtn, body.riding #toolPanel button { filter: grayscale(1); opacity: 0.45; }
+  body.riding .seat-bubble:not(.door-bubble) { display: none; }
+  #balloonOffBtn { display: none; width: 52px; height: 52px; align-self: flex-start; }
+  #balloonOffBtn svg { width: 28px; height: 28px; }
+  body.ballooning #balloonOffBtn { display: flex; }
+  body.ballooning #toolBtn, body.ballooning #toolPanel button { filter: grayscale(1); opacity: 0.45; }
+  body.ballooning .seat-bubble:not(.balloon-bubble) { display: none; }
+  #speedFx { position: fixed; inset: 0; z-index: 5; pointer-events: none; opacity: 0; transition: opacity 0.4s;
+    background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(255, 255, 255, 0.55) 0deg 0.6deg, transparent 0.6deg 9deg);
+    -webkit-mask-image: radial-gradient(ellipse at center, transparent 48%, #000 95%); mask-image: radial-gradient(ellipse at center, transparent 48%, #000 95%); }
+  #bananaOffBtn { display: none; width: 52px; height: 52px; align-self: flex-start; }
+  #bananaOffBtn svg { width: 28px; height: 28px; }
+  body.bananaing #bananaOffBtn { display: flex; }
+  body.bananaing #toolBtn, body.bananaing #toolPanel button, body.swimming #toolBtn, body.swimming #toolPanel button { filter: grayscale(1); opacity: 0.45; }
+  body.bananaing .seat-bubble:not(.banana-bubble), body.swimming .seat-bubble { display: none; }
   #dlgChoices button[data-talk="shop"] { background: linear-gradient(180deg, #ffe8a0, #ffd36a); }
   #shopPanel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(320px, calc(100vw - 48px)); box-sizing: border-box; display: none; flex-direction: column; gap: 10px;
     padding: 18px 16px 14px; color: var(--ink); user-select: none; touch-action: manipulation; max-height: calc(100vh - 80px); }
@@ -201,6 +231,10 @@
   .shop-row .shop-icon { width: 48px; height: 48px; flex: none; font-size: 28px; }
   .shop-name { flex: 1; font-size: 14px; }
   .shop-price { font-size: 13px; font-weight: bold; color: #8a5a36; }
+  #fireBanner { position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); transform: translate(-50%, -12px); z-index: 25; padding: 8px 18px; border-radius: 999px;
+    font-weight: bold; font-size: 15px; color: #7a3a10; background: linear-gradient(180deg, #ffe8a0, #ffc56a); box-shadow: 0 4px 12px rgba(120, 60, 10, 0.3); opacity: 0; pointer-events: none; transition: opacity 0.4s, transform 0.4s; }
+  #fireBanner.show { opacity: 1; transform: translate(-50%, 0); }
+  .shop-soon { margin: 4px 0 0; text-align: center; font-size: 14px; font-weight: bold; color: #b0583a; }
   .shop-buy { font: inherit; font-size: 13px; padding: 7px 12px; border: none; border-radius: 12px; background: linear-gradient(180deg, #ffe8a0, #ffd36a); color: var(--ink); }
   .shop-buy:disabled { opacity: 0.45; cursor: default; }
   #shopPanel .soon { text-align: center; font-size: 13px; color: #b0583a; }
@@ -318,7 +352,7 @@
 </script>
 </head>
 <body>
-<div id="clock" class="hud pill"><span id="clockName">--:-- MYT</span><small id="sunTimes"></small><small class="keys">1 Day · 2 Dusk · 3 Night · 0 Real time</small></div>
+<div id="clock" class="hud pill"><span id="clockName">--:-- MYT</span><small id="sunTimes"></small><small class="keys">1 Day · 2 Dusk · 3 Night · 0 Real time</small><small class="tapHint">Tap to preview</small></div>
 <div id="help" class="hud pill">Click the ground to walk · click shells, fruit and flowers to pick them up</div>
 <div id="toast" class="hud pill"></div>
 <div id="players" class="hud pill">Connecting…</div>
@@ -331,6 +365,10 @@
     <button class="slot hidden" data-tool="house" title="House Tool" aria-label="House Tool"></button>
   </div>
   <div id="bagPanel" class="wood-frame"></div>
+  <button id="bikeOffBtn" class="round-btn" type="button" title="Get off" aria-label="Get off the bicycle"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8 V30 M15 22 L24 31 L33 22" fill="none" stroke="#fbf0dc" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 39 H36" stroke="#fbf0dc" stroke-width="5" stroke-linecap="round"/></svg></button>
+  <div id="speedFx" aria-hidden="true"></div>
+  <button id="bananaOffBtn" class="round-btn" type="button" title="Get off" aria-label="Get off the banana boat"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8 V30 M15 22 L24 31 L33 22" fill="none" stroke="#fbf0dc" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 39 H36" stroke="#fbf0dc" stroke-width="5" stroke-linecap="round"/></svg></button>
+  <button id="balloonOffBtn" class="round-btn" type="button" title="Get off" aria-label="Get off the balloon"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8 V30 M15 22 L24 31 L33 22" fill="none" stroke="#fbf0dc" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 39 H36" stroke="#fbf0dc" stroke-width="5" stroke-linecap="round"/></svg></button>
   <div class="row">
     <button id="bagBtn" class="round-btn" title="Backpack" aria-label="Backpack"></button>
     <button id="toolBtn" class="round-btn" title="Tools" aria-label="Tools"></button>
@@ -359,6 +397,12 @@
     <button type="button" class="cancel" id="eatNo">Cancel</button>
   </div>
 </div>
+<div id="bikePanel" class="wood-frame" role="dialog" aria-modal="true" aria-labelledby="bikeTitle">
+  <h3 id="bikeTitle">Pick a colour</h3>
+  <div id="bikeSwatches"></div>
+  <button type="button" id="bikeCancel">Cancel</button>
+</div>
+<div id="fireBanner" aria-live="polite">🔥 Fire show starting!</div>
 <button id="logout" type="button">Log out</button>
 <button id="backBtn" class="round-btn" type="button" title="Leave the house" aria-label="Leave the house"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M29 11 L16 24 L29 37" fill="none" stroke="#fbf0dc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
 <button id="saveBtn" type="button" title="Save your furniture" aria-label="Save your furniture (unsaved changes)"><span class="dot"></span>Save <small>unsaved</small></button>
@@ -372,6 +416,7 @@
       <button type="button" data-talk="chat">Chat</button>
       <button type="button" data-talk="island">About the island</button>
       <button type="button" data-talk="shop">I want to shop</button>
+      <button type="button" data-talk="return" hidden>Return the bicycle</button>
       <button type="button" data-talk="bye">Bye</button>
     </div>
   </div>
