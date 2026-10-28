@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createIsland, PALETTE, LAYOUT, loopPolyline, plotVisit, buildBoRoute, routeAt, riverPolyline, makePath, pathAt, bananaCourse, bananaRideAt, bananaRetAt, bananaReturnCtrl, VOLLEY, volleyEngine, volleyBallAt, volleyStart, volleyClamp, volleyHalfOf, volleyMatchPoint } from './island.js';
+import { createIsland, PALETTE, LAYOUT, loopPolyline, plotVisit, buildBoRoute, routeAt, riverPolyline, makePath, pathAt, bananaCourse, bananaRideAt, bananaRetAt, bananaReturnCtrl, VOLLEY, volleyEngine, volleyBallAt, volleyStart, volleyClamp, volleyHalfOf, volleyMatchPoint, pondR, POND_DOCK, atPond } from './island.js';
 
 // ---------------------------------------------------------------- helpers
 function mulberry32(a) {
@@ -2987,6 +2987,22 @@ Object.assign(KINDS, {
     for (const x of [-0.07, 0.07]) g.add(mesh(new THREE.SphereGeometry(0.022, 5, 4), mat('#2b211c'), x, 0.16, 0.18));
     return g;
   } },
+  koi: { name: 'a koi', make() { // caught in the home pond: white with orange patches
+    const g = new THREE.Group(), w = mat('#fffaf0'), o = mat('#ff7a3a');
+    const body = mesh(new THREE.SphereGeometry(0.16, 8, 6), w, 0, 0.12, 0); body.scale.set(0.55, 0.62, 1.6); g.add(body);
+    for (const [z, y] of [[0.1, 0.17], [-0.12, 0.16]]) { const sp = mesh(new THREE.SphereGeometry(0.08, 6, 4), o, 0, y, z); sp.scale.set(0.9, 0.5, 1.2); g.add(sp); }
+    const tail = mesh(new THREE.ConeGeometry(0.13, 0.22, 4), o, 0, 0.12, -0.32); tail.rotation.x = -Math.PI / 2; tail.scale.x = 0.3; g.add(tail);
+    for (const x of [-0.07, 0.07]) g.add(mesh(new THREE.SphereGeometry(0.022, 5, 4), mat('#2b211c'), x, 0.15, 0.2));
+    return g;
+  } },
+  carp: { name: 'a carp', make() { // a plump golden-brown pond fish
+    const g = new THREE.Group(), c = mat('#c9a04a'), d = mat('#a07a32');
+    const body = mesh(new THREE.SphereGeometry(0.17, 8, 6), c, 0, 0.13, 0); body.scale.set(0.6, 0.75, 1.5); g.add(body);
+    g.add(mesh(new THREE.ConeGeometry(0.05, 0.12, 4), d, 0, 0.26, -0.02));
+    const tail = mesh(new THREE.ConeGeometry(0.12, 0.2, 4), d, 0, 0.13, -0.3); tail.rotation.x = -Math.PI / 2; tail.scale.x = 0.3; g.add(tail);
+    for (const x of [-0.07, 0.07]) g.add(mesh(new THREE.SphereGeometry(0.022, 5, 4), mat('#2b211c'), x, 0.17, 0.19));
+    return g;
+  } },
   puffer: { name: 'a pufferfish', make() { // a round yellow fish with soft little spikes
     const g = new THREE.Group(), y = mat('#f6d55c');
     g.add(mesh(new THREE.IcosahedronGeometry(0.2, 1), y, 0, 0.2, 0));
@@ -3206,6 +3222,8 @@ const ICONS = {
   scarab: svg(`<g stroke="#2b3a2a" stroke-width="2" stroke-linecap="round"><path d="M12 22 L6 18 M12 30 L5 31 M14 38 L9 43 M36 22 L42 18 M36 30 L43 31 M34 38 L39 43"/></g><path d="M18 9 L15 4 M30 9 L33 4" stroke="#c9a03a" stroke-width="2.2" stroke-linecap="round"/><ellipse cx="24" cy="13" rx="7" ry="6" fill="#2f6f5a"/><ellipse cx="24" cy="29" rx="13" ry="15" fill="#3a8f6f" stroke="#1f5a44" stroke-width="2.2"/><path d="M24 15 V44" stroke="#1f5a44" stroke-width="2"/><ellipse cx="19" cy="25" rx="3" ry="6" fill="#7fd0a8" opacity=".6"/><circle cx="24" cy="29" r="2.4" fill="#f2c94c"/>`),
   lizard: svg(`<path d="M30 30 C38 34 42 40 44 46" fill="none" stroke="#c99a3a" stroke-width="4" stroke-linecap="round"/><g stroke="#a87a2a" stroke-width="3" stroke-linecap="round"><path d="M16 22 L9 17 M16 32 L9 37 M28 22 L35 17 M28 32 L35 37"/></g><ellipse cx="22" cy="27" rx="10" ry="6.5" fill="#e8b84a" stroke="#a87a2a" stroke-width="2"/><ellipse cx="10" cy="14" rx="6" ry="4.5" fill="#e8b84a" stroke="#a87a2a" stroke-width="2" transform="rotate(-30 10 14)"/><circle cx="8" cy="12" r="1.6" fill="#23313f"/><g fill="#c98a3a"><circle cx="19" cy="25" r="1.6"/><circle cx="24" cy="29" r="1.6"/><circle cx="26" cy="24" r="1.4"/></g>`),
   clownfish: svg(`<path d="M35 24 L46 15 L44 24 L46 33 Z" fill="#ff8a3a" stroke="#b8541f" stroke-width="2" stroke-linejoin="round"/><ellipse cx="22" cy="24" rx="16" ry="11" fill="#ff8a3a" stroke="#b8541f" stroke-width="2.2"/><path d="M15 14 Q13 24 15 34 L20 34.5 Q18 24 20 13.5 Z M27 13.5 Q25 24 27 34.5 L31 33 Q29.5 24 31 15 Z" fill="#fffaf0"/><ellipse cx="22" cy="24" rx="16" ry="11" fill="none" stroke="#b8541f" stroke-width="2.2"/><circle cx="11" cy="21" r="3" fill="#fff"/><circle cx="10.5" cy="21.4" r="1.8" fill="#23313f"/>`),
+  koi: svg(`<path d="M34 24 L46 14 L43 24 L46 34 Z" fill="#ff7a3a" stroke="#c0541f" stroke-width="2" stroke-linejoin="round"/><ellipse cx="21" cy="24" rx="16" ry="10" fill="#fffaf0" stroke="#c0541f" stroke-width="2.2"/><ellipse cx="16" cy="20" rx="6" ry="4" fill="#ff7a3a"/><ellipse cx="27" cy="27" rx="5" ry="3.5" fill="#ff7a3a"/><circle cx="10" cy="22" r="2" fill="#23313f"/>`),
+  carp: svg(`<path d="M34 24 L46 14 L43 24 L46 34 Z" fill="#a07a32" stroke="#7a5a20" stroke-width="2" stroke-linejoin="round"/><ellipse cx="21" cy="24" rx="16" ry="11" fill="#d9b25a" stroke="#7a5a20" stroke-width="2.2"/><path d="M14 18 Q21 15 28 18 M14 30 Q21 33 28 30" fill="none" stroke="#a07a32" stroke-width="1.6"/><path d="M19 13 L23 9 L25 13" fill="#a07a32"/><circle cx="10" cy="22" r="2" fill="#23313f"/>`),
   puffer: svg(`<g stroke="#b8862a" stroke-width="2" stroke-linecap="round"><path d="M24 6 V10 M24 38 V42 M8 24 H12 M12 12 L15 15 M12 36 L15 33 M36 12 L33 15 M36 36 L33 33"/></g><path d="M37 24 L45 17 L43 24 L45 31 Z" fill="#f6d55c" stroke="#b8862a" stroke-width="2" stroke-linejoin="round"/><circle cx="24" cy="24" r="13" fill="#f6d55c" stroke="#b8862a" stroke-width="2.2"/><ellipse cx="23" cy="29" rx="8" ry="4.5" fill="#fff4c2"/><circle cx="18" cy="20" r="3.2" fill="#fff"/><circle cx="17.6" cy="20.4" r="1.9" fill="#23313f"/><circle cx="15" cy="27" r="1.6" fill="#f2a6a0"/>`),
   crab: svg(`<g stroke="#b8402a" stroke-width="2.4" stroke-linecap="round"><path d="M14 30 L6 34 M14 34 L7 40 M34 30 L42 34 M34 34 L41 40"/><path d="M15 24 L9 16 M33 24 L39 16"/></g><circle cx="8" cy="13" r="5" fill="#ef6a4a" stroke="#b8402a" stroke-width="2"/><circle cx="40" cy="13" r="5" fill="#ef6a4a" stroke="#b8402a" stroke-width="2"/><ellipse cx="24" cy="29" rx="13" ry="9" fill="#ef6a4a" stroke="#b8402a" stroke-width="2.2"/><path d="M20 21 V17 M28 21 V17" stroke="#b8402a" stroke-width="2"/><circle cx="20" cy="16" r="2.4" fill="#fff"/><circle cx="28" cy="16" r="2.4" fill="#fff"/><circle cx="20" cy="16" r="1.2" fill="#23313f"/><circle cx="28" cy="16" r="1.2" fill="#23313f"/><path d="M20 31 q4 3 8 0" fill="none" stroke="#b8402a" stroke-width="1.6" stroke-linecap="round"/>`),
   conch: svg(`<path d="M10 34 C6 20 18 6 32 9 C42 11 44 22 36 30 C30 36 18 40 10 34 Z" fill="#f6b8a8" stroke="#c97a68" stroke-width="2.2"/><path d="M14 31 C20 22 28 16 36 16 M17 34 C24 28 31 24 38 24" fill="none" stroke="#c97a68" stroke-width="1.8"/><ellipse cx="19" cy="30" rx="6" ry="4" fill="#ffe2d8" transform="rotate(-30 19 30)"/><path d="M32 9 L38 4" stroke="#c97a68" stroke-width="2.2" stroke-linecap="round"/>`),
@@ -3442,7 +3460,7 @@ const sunEl = document.getElementById('sunTimes');
 const toastEl = document.getElementById('toast');
 // the backpack holds everything picked up from the ground (`pocket` counts per kind)
 const BAG_LABELS = { shell: 'Seashells', star: 'Starfish', coconut: 'Coconuts', mango: 'Mangoes', pineapple: 'Pineapples', smallfish: 'Small fish', bigfish: 'Big fish', carrot: 'Carrots', tomato: 'Tomatoes', cabbage: 'Cabbages', flower: 'Flowers',
-  butterfly: 'Butterflies', beetle: 'Beetles', dragonfly: 'Dragonflies', scarab: 'Scarabs', lizard: 'Sand lizards', crab: 'Crabs', conch: 'Conch shells', clownfish: 'Clownfish', puffer: 'Pufferfish' };
+  butterfly: 'Butterflies', beetle: 'Beetles', dragonfly: 'Dragonflies', scarab: 'Scarabs', lizard: 'Sand lizards', crab: 'Crabs', conch: 'Conch shells', clownfish: 'Clownfish', puffer: 'Pufferfish', koi: 'Koi', carp: 'Carp' };
 const bagEl = document.getElementById('bagPanel');
 const FOODS = new Set(['coconut', 'mango', 'pineapple', 'carrot', 'tomato', 'cabbage']); // can be eaten from the backpack
 const FOOD_ENERGY = 15; // fruit; crops give less (foodEnergy), as on the server
@@ -3640,6 +3658,12 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const hits = raycaster.intersectObjects([terrain, dockClick, pier2.click, ...deckClicks], false);
   if (!hits.length) return;
   const p = hits[0].point, onDeckHit = hits[0].object.userData.deck;
+  if (currentTool === 'rod' && walk.deck != null && onDeckHit === undefined && !walkable(p.x, p.z) && H(p.x, p.z) < 0) {
+    if (Math.hypot(p.x - player.position.x, p.z - player.position.z) > CAST_RANGE) { toast('Too far out, try closer to the dock'); return; }
+    if (energy < CAST_COST) { toast('Too tired, eat something'); return; }
+    walk.target = null; walk.route = null; startCast(new THREE.Vector3(p.x, 0, p.z)); showMarker(p.x, p.z);
+    return;
+  }
   if (onDeckHit !== undefined || walk.deck != null) {
     const to = onDeckHit !== undefined ? onDeckHit : -1;
     if (to === -1 && !walkable(p.x, p.z)) return;
@@ -3913,7 +3937,7 @@ function updatePlayer(dt, time) {
         if (d < rad && d > 1e-4) { px = c.x + (ox / d) * rad; pz = c.z + (oz / d) * rad; }
       }
       const lv = walk.deck ?? -1, curY = lv >= 0 ? deckY(DECKS[lv], player.position.x, player.position.z) : groundY(player.position.x, player.position.z);
-      const climb = !!(walk.route && walk.route.length);
+      const climb = !!(walk.route && walk.route.length) || (walk.deck == null && !!walk.target && DECKS.some((d) => deckHas(d, walk.target.x, walk.target.z) && Math.abs(deckY(d, walk.target.x, walk.target.z) - curY) < 0.5)); // or heading onto a dock or jetty at about your height
       let to;
       if ((to = standAt(px, pz, lv, curY, climb)) !== null) { player.position.x = px; player.position.z = pz; }
       else if ((to = standAt(nx, pz, lv, curY, climb)) !== null) player.position.x = nx;
@@ -5777,7 +5801,7 @@ const sellUI = { root: document.getElementById('sellPanel'), line: document.getE
 const BO_HELLOS = ['Ding ding! Got anything nice for old Bo?', 'Oh ho, a customer! Let\'s see that backpack.', 'Fair prices, happy faces! What have you got?', 'Bo buys the good stuff. Show me, show me!'];
 const SELL_NAMES = { coconut: 'Coconut', mango: 'Mango', pineapple: 'Pineapple', shell: 'Seashell', star: 'Starfish', smallfish: 'Small fish', bigfish: 'Big fish', flower: 'Flower',
   butterfly: 'Butterfly', beetle: 'Beetle', dragonfly: 'Dragonfly', carrot: 'Carrot', tomato: 'Tomato', cabbage: 'Cabbage',
-  scarab: 'Scarab beetle', lizard: 'Sand lizard', crab: 'Crab', conch: 'Conch shell', clownfish: 'Clownfish', puffer: 'Pufferfish' };
+  scarab: 'Scarab beetle', lizard: 'Sand lizard', crab: 'Crab', conch: 'Conch shell', clownfish: 'Clownfish', puffer: 'Pufferfish', koi: 'Koi', carp: 'Carp' };
 const sellable = (k) => Number.isInteger(sellPrices[k]) && sellPrices[k] > 0;
 function boAnswered(m) {
   if (!m.ok) { toast(m.msg || 'Get a little closer to Bo'); return; }
@@ -5982,7 +6006,7 @@ function strike() { // the player clicked while the line is out
     const from = fishing.bobber.position.clone();
     endFishing();
     if (net.online) { catchFrom = from; net.send({ t: 'fish' }); return; } // the server checks the timing and rolls the catch
-    const table = atBeach(player.position.x, player.position.z) ? BEACH_CATCH_TABLE : CATCH_TABLE;
+    const table = atPond(player.position.x, player.position.z) ? POND_CATCH_TABLE : atBeach(player.position.x, player.position.z) ? BEACH_CATCH_TABLE : CATCH_TABLE;
     let r = Math.random(), kind = table[table.length - 1][0];
     for (const [k, chance] of table) { if (r < chance) { kind = k; break; } r -= chance; }
     pocket[kind]++; renderPocket();
@@ -5990,12 +6014,13 @@ function strike() { // the player clicked while the line is out
   } else endFishing('Too early! The fish got away');
 }
 let catchFrom = null; // where the bobber was, while the server decides what bit
-const CATCH_NAMES = { smallfish: 'a small fish', bigfish: 'a big fish', shell: 'a seashell', star: 'a starfish', clownfish: 'a clownfish', puffer: 'a pufferfish', crab: 'a crab' };
+const CATCH_NAMES = { smallfish: 'a small fish', bigfish: 'a big fish', shell: 'a seashell', star: 'a starfish', clownfish: 'a clownfish', puffer: 'a pufferfish', crab: 'a crab', koi: 'a koi', carp: 'a carp' };
 // fishing off the beach turns up beach catches too (the same tables as CATCH_TABLE and BEACH_CATCH_TABLE in server.js)
 const BEACH_AREA = LAYOUT.areas.beach;
 const atBeach = (x, z) => x < -43 && ((x - BEACH_AREA.x) / BEACH_AREA.rx) ** 2 + ((z - BEACH_AREA.z) / BEACH_AREA.rz) ** 2 < 2.56;
 const CATCH_TABLE = [['smallfish', 0.6], ['bigfish', 0.25], ['shell', 0.075], ['star', 0.075]];
 const BEACH_CATCH_TABLE = [['smallfish', 0.33], ['clownfish', 0.22], ['puffer', 0.15], ['bigfish', 0.13], ['crab', 0.1], ['star', 0.07]];
+const POND_CATCH_TABLE = [['carp', 0.35], ['koi', 0.25], ['smallfish', 0.25], ['crab', 0.15]]; // the home pond (POND_CATCH_TABLE in server.js)
 function caught(kind, from) {
   toast(kind === 'bigfish' ? 'You caught a big fish! What a whopper!' : `You caught ${CATCH_NAMES[kind] || KINDS[kind].name}!`);
   landFish(from, kind);
@@ -6034,8 +6059,8 @@ function updateFishing(dt, time) {
     rig.armR.rotation.x = -1.0 + Math.sin(time * 1.3) * 0.03;
     b.position.set(f.to.x, waterY + Math.sin(time * 2.2) * 0.02, f.to.z);
     if (f.phase === 'waiting' && !f.fish && f.t >= f.biteAt - 1.8) { // a fish comes for a look
-      const beach = atBeach(f.to.x, f.to.z), a = Math.random() * TAU;
-      f.fish = new THREE.Mesh(BITE_FISH_GEO, new THREE.MeshBasicMaterial({ color: beach ? pick([0xff8a3a, 0xf6d55c, 0x6fd3f0, 0xff8fb8]) : 0x1d3a52, transparent: true, opacity: beach ? 0.9 : 0.45, depthWrite: false }));
+      const beach = atBeach(f.to.x, f.to.z), pondFish = atPond(f.to.x, f.to.z), a = Math.random() * TAU;
+      f.fish = new THREE.Mesh(BITE_FISH_GEO, new THREE.MeshBasicMaterial({ color: beach ? pick([0xff8a3a, 0xf6d55c, 0x6fd3f0, 0xff8fb8]) : pondFish ? pick([0xff8a3a, 0xfffaf0, 0xf6c84c, 0xc9a04a]) : 0x1d3a52, transparent: true, opacity: beach || pondFish ? 0.9 : 0.45, depthWrite: false }));
       f.fishFrom = new THREE.Vector3(f.to.x + Math.cos(a) * 1.8, 0, f.to.z + Math.sin(a) * 1.8);
       scene.add(f.fish);
     }
@@ -7800,6 +7825,209 @@ function updateVolley(dt, time) {
 const volBannerEl = document.getElementById('volleyBanner');
 let volBannerT = 0;
 function volBanner(text, ms = 900) { if (!volBannerEl) return; volBannerEl.textContent = text; volBannerEl.classList.add('show'); clearTimeout(volBannerT); volBannerT = setTimeout(() => volBannerEl.classList.remove('show'), ms); }
+// ---------------------------------------------------------------- the home pond
+// A soft kidney-shaped pond (pondR in island.js) on the lawn between the town and home 1: clear teal water (light at
+// the edges, deeper blue in the middle) with ripples, sparkles and the sky's colour in it; a sandy, muddy bank with
+// pebbles; reeds, cattails, lily pads and lilies; wildflowers and grass round it; a cherry blossom tree; dragonflies
+// and butterflies by day, fireflies at dusk and night; koi and ducks that swim on a schedule every player shares
+// (worked out from the server's pond seed and the shared clock); and a little wooden dock with a lantern.
+let pondSeed = 4242;
+const pond = (() => {
+  const P = LAYOUT.pond, PX = P.x, PZ = P.z, at = (th, r) => ({ x: PX + Math.cos(th) * r, z: PZ + Math.sin(th) * r });
+  const D = POND_DOCK, dYAt = (u) => lerp(D.ya, D.yb, clamp(u, 0, 1)), dockDir = Math.atan2(D.b[0] - D.a[0], D.b[1] - D.a[1]);
+  const dockTh = Math.atan2(D.b[1] - PZ, D.b[0] - PX), riverTh = Math.atan2(LAYOUT.river.pts[0][1] - PZ, LAYOUT.river.pts[0][0] - PX);
+  const pathEnd = LAYOUT.pondPath[LAYOUT.pondPath.length - 1], pathTh = Math.atan2(pathEnd[1] - PZ, pathEnd[0] - PX);
+  // the real shoreline (where the lawn meets the water), measured once all round: everything here follows it
+  const SHN = 72, SH = Array.from({ length: SHN }, (_, k) => { const th = (k / SHN) * TAU; for (let r = 0.5; r < 4.2; r += 0.05) if (H(PX + Math.cos(th) * r, PZ + Math.sin(th) * r) > 0.03) return Math.min(r, 3.6); return 3.6; });
+  const shore = (th) => { const u = ((th / TAU) % 1 + 1) % 1 * SHN, k = Math.floor(u) % SHN; return lerp(SH[k], SH[(k + 1) % SHN], u - Math.floor(u)); };
+  const angGap = (a, b) => Math.abs(((a - b + Math.PI) % TAU + TAU) % TAU - Math.PI);
+  const keepClear = (th) => angGap(th, dockTh) < 0.45 || angGap(th, riverTh) < 0.5 || angGap(th, pathTh) < 0.35; // the dock, the river mouth, the path's end
+  let sd = 917; const rnd = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; }; // its own random numbers (the island's stay untouched)
+  // ---- the water: rings out from the middle, stretched to the kidney outline; colour, ripples and sparkles in a tiny shader
+  const SEG = 64, RINGS = 6, wp = [], we = [], wi = [];
+  wp.push(0, 0, 0); we.push(0);
+  for (let k = 1; k <= RINGS; k++) for (let i = 0; i < SEG; i++) { const th = (i / SEG) * TAU, e = k / RINGS, r = (shore(th) + 0.25) * e; wp.push(Math.cos(th) * r, 0, Math.sin(th) * r); we.push(e); }
+  for (let i = 0; i < SEG; i++) wi.push(0, 1 + ((i + 1) % SEG), 1 + i);
+  for (let k = 1; k < RINGS; k++) for (let i = 0; i < SEG; i++) { const a = 1 + (k - 1) * SEG + i, b = 1 + (k - 1) * SEG + ((i + 1) % SEG), c = a + SEG, d = b + SEG; wi.push(a, b, c, b, d, c); }
+  const wgeo = new THREE.BufferGeometry(); wgeo.setAttribute('position', new THREE.Float32BufferAttribute(wp, 3)); wgeo.setAttribute('edge', new THREE.Float32BufferAttribute(we, 1)); wgeo.setIndex(wi);
+  const lanternAt = new THREE.Vector3(D.b[0], D.yb + 1.25, D.b[1]);
+  const wmat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: { uTime: { value: 0 }, uShallow: { value: new THREE.Color('#8fe6d8') }, uDeep: { value: new THREE.Color('#2f9cc8') }, uSky: { value: new THREE.Color('#bfe6ff') }, uDay: { value: 1 }, uLamp: { value: 0 }, uLampAt: { value: new THREE.Vector2(D.b[0] - PX, D.b[1] - PZ) } },
+    vertexShader: 'attribute float edge; varying float vE; varying vec2 vP; void main() { vE = edge; vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform float uTime, uDay, uLamp; uniform vec3 uShallow, uDeep, uSky; uniform vec2 uLampAt; varying float vE; varying vec2 vP;
+      float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      void main() {
+        vec3 c = mix(uDeep, uShallow, smoothstep(0.25, 0.95, vE));
+        float rip = sin(vP.x * 3.1 + uTime * 1.3) * sin(vP.y * 2.7 - uTime * 1.1) + 0.5 * sin(length(vP) * 5.0 - uTime * 1.6);
+        c += vec3(0.06) * rip * uDay;
+        c = mix(c, uSky, 0.28); // the sky's colour on the water
+        vec2 g = floor(vP * 6.0 + vec2(uTime * 0.4, uTime * 0.25)); float sp = h(g); float tw = 0.5 + 0.5 * sin(uTime * 4.0 + sp * 30.0);
+        c += vec3(1.0) * step(0.965, sp) * tw * (0.25 + 0.55 * uDay); // little sparkles
+        c *= 0.45 + 0.55 * uDay;
+        float ld = length(vP - uLampAt); c += vec3(1.0, 0.72, 0.38) * uLamp * 0.75 * exp(-ld * ld * 0.55); // the lantern's glow
+        gl_FragColor = vec4(c, mix(0.8, 0.6, smoothstep(0.75, 1.0, vE)));
+      }`,
+  });
+  const water = new THREE.Mesh(wgeo, wmat); water.position.set(PX, 0.075, PZ); water.renderOrder = 2; scene.add(water);
+  // ---- the bank: a strip of sand and mud draped over the slope, with pebbles and a few small rocks
+  const bp = [], bc = [], bi = [], sand = new THREE.Color('#e6cf9c'), mud = new THREE.Color('#a9875c');
+  for (let i = 0; i <= SEG; i++) {
+    const th = (i / SEG) * TAU, r = shore(th), wob = Math.sin(th * 5) * 0.12;
+    for (const [rr2, col] of [[r - 0.35, mud], [r + 0.25, sand], [r + 0.85 + wob, sand]]) { const q = at(th, rr2); bp.push(q.x, Math.max(H(q.x, q.z), 0.02) + 0.025, q.z); bc.push(col.r, col.g, col.b); }
+  }
+  for (let i = 0; i < SEG; i++) for (let k = 0; k < 2; k++) { const a = i * 3 + k, b = a + 3; bi.push(a, b, a + 1, b, b + 1, a + 1); }
+  const bgeo = new THREE.BufferGeometry(); bgeo.setAttribute('position', new THREE.Float32BufferAttribute(bp, 3)); bgeo.setAttribute('color', new THREE.Float32BufferAttribute(bc, 3)); bgeo.setIndex(bi); bgeo.computeVertexNormals();
+  const bank = new THREE.Mesh(bgeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true, transparent: true, opacity: 0.92, depthWrite: false })); bank.receiveShadow = true; bank.renderOrder = 1; scene.add(bank);
+  const pebM = [mat('#c9c2b4'), mat('#a8a39a'), mat('#d9cdb4')];
+  for (let i = 0; i < 46; i++) { const th = rnd() * TAU; if (angGap(th, dockTh) < 0.25) continue; const q = at(th, shore(th) + 0.15 + rnd() * 0.6), s = 0.05 + rnd() * 0.09, pb = mesh(new THREE.DodecahedronGeometry(s, 0), pebM[i % 3], q.x, Math.max(H(q.x, q.z), 0.02) + s * 0.4, q.z); pb.scale.y = 0.55; pb.castShadow = false; scene.add(pb); }
+  for (let i = 0; i < 5; i++) { const th = rnd() * TAU; if (keepClear(th)) continue; const q = at(th, shore(th) + 0.55), s = 0.18 + rnd() * 0.12, rk = mesh(new THREE.DodecahedronGeometry(s, 0), mat('#b9b2a6'), q.x, Math.max(H(q.x, q.z), 0) + s * 0.35, q.z); rk.scale.y = 0.7; rk.rotation.y = rnd() * TAU; scene.add(rk); }
+  // ---- reeds and cattails along the edge (they sway), lily pads and lilies on the water
+  const swayers = [], reedM = mat('#7fae4a'), reedD = mat('#5f8f3a'), cat = mat('#7a4e2c');
+  for (let i = 0; i < 22; i++) {
+    const th = (i / 22) * TAU + rnd() * 0.2; if (keepClear(th)) continue;
+    const q = at(th, shore(th) + (rnd() - 0.4) * 0.5), g = new THREE.Group(); g.position.set(q.x, Math.max(H(q.x, q.z), -0.3), q.z); scene.add(g);
+    const n = 3 + Math.floor(rnd() * 4);
+    for (let k = 0; k < n; k++) {
+      const h2 = 0.7 + rnd() * 0.7, lx = (rnd() - 0.5) * 0.35, lz = (rnd() - 0.5) * 0.35, blade = mesh(new THREE.ConeGeometry(0.035, h2, 3), k % 2 ? reedM : reedD, lx, h2 / 2, lz); blade.rotation.set((rnd() - 0.5) * 0.3, rnd() * 3, (rnd() - 0.5) * 0.3); blade.castShadow = false; g.add(blade);
+      if (k === 0 || rnd() < 0.3) { const ch = h2 + 0.15; g.add(mesh(new THREE.CylinderGeometry(0.012, 0.012, ch, 3), reedD, lx + 0.05, ch / 2, lz)); g.add(mesh(new THREE.CapsuleGeometry(0.045, 0.16, 2, 5), cat, lx + 0.05, ch - 0.05, lz)); }
+    }
+    swayers.push({ g, ph: rnd() * TAU });
+  }
+  const lilyM = mat('#6cbf5a'), lilyD = mat('#58a64a'), pads = [];
+  for (let i = 0; i < 9; i++) {
+    const th = rnd() * TAU; if (angGap(th, dockTh) < 0.5) { i--; continue; }
+    const q = at(th, shore(th) * (0.35 + rnd() * 0.45)), s = 0.24 + rnd() * 0.14, g = new THREE.Group(); g.position.set(q.x, 0.085, q.z); g.rotation.y = rnd() * TAU; scene.add(g);
+    const pad = mesh(new THREE.CircleGeometry(s, 10, 0.35, TAU - 0.7), i % 3 ? lilyM : lilyD); pad.rotation.x = -Math.PI / 2; pad.castShadow = false; g.add(pad);
+    if (i % 2 === 0) { // a pink or white lily
+      const fl = new THREE.Group(); fl.position.set(s * 0.15, 0.02, 0); g.add(fl);
+      const pc = mat(i % 4 === 0 ? '#ffffff' : '#ffb3c8');
+      for (let k = 0; k < 6; k++) { const pt = mesh(new THREE.ConeGeometry(0.045, 0.16, 4), pc, Math.cos((k / 6) * TAU) * 0.05, 0.05, Math.sin((k / 6) * TAU) * 0.05); pt.rotation.set(Math.sin((k / 6) * TAU) * 0.9, 0, -Math.cos((k / 6) * TAU) * 0.9); fl.add(pt); }
+      fl.add(mesh(new THREE.SphereGeometry(0.03, 6, 4), mat('#f6d55c'), 0, 0.06, 0));
+    }
+    pads.push({ g, ph: rnd() * TAU });
+  }
+  // ---- wildflowers and tall grass tufts on the lawn round it (never on a path, never solid)
+  const onPath = (x, z) => pathSegs.some(([a, b, w]) => { const ux = b.x - a.x, uz = b.z - a.z, l2 = ux * ux + uz * uz || 1, t = clamp(((x - a.x) * ux + (z - a.z) * uz) / l2, 0, 1); return Math.hypot(x - a.x - ux * t, z - a.z - uz * t) < w + 0.4; });
+  const freeAt = (x, z, m) => H(x, z) > 0.12 && !onPath(x, z) && !colliders.some((c) => !c.lvl && Math.hypot(c.x - x, c.z - z) < (c.r || 0) + m);
+  const flowerC = ['#f6d55c', '#ffffff', '#ff9ec0', '#f6d55c', '#ffd0e0'], tuft = mat('#8fc85a');
+  for (let i = 0, made = 0; i < 160 && made < 34; i++) {
+    const th = rnd() * TAU, q = at(th, shore(th) + 1.0 + rnd() * 2.2); if (keepClear(th) || !freeAt(q.x, q.z, 0.3)) continue;
+    const y = H(q.x, q.z), g = new THREE.Group(); g.position.set(q.x, y, q.z); scene.add(g);
+    if (made % 3 === 2) { for (let k = 0; k < 4; k++) { const b = mesh(new THREE.ConeGeometry(0.04, 0.45 + rnd() * 0.25, 3), tuft, (rnd() - 0.5) * 0.18, 0.25, (rnd() - 0.5) * 0.18); b.rotation.z = (rnd() - 0.5) * 0.5; b.castShadow = false; g.add(b); } }
+    else { const c = mat(flowerC[made % flowerC.length]); for (let k = 0; k < 3; k++) { const fx = (rnd() - 0.5) * 0.3, fz = (rnd() - 0.5) * 0.3, st = 0.18 + rnd() * 0.1; g.add(mesh(new THREE.CylinderGeometry(0.01, 0.01, st, 3), reedM, fx, st / 2, fz)); const hd = mesh(new THREE.SphereGeometry(0.045, 6, 4), c, fx, st + 0.02, fz); hd.scale.y = 0.6; hd.castShadow = false; g.add(hd); } }
+    made++;
+  }
+  // ---- a pink cherry blossom tree and two round bushes nearby (spots found on open lawn, off the paths)
+  const spotNear = (th0, r0, m) => { for (let k = 0; k < 300; k++) { const th = th0 + (rnd() - 0.5) * 2.4, r = r0 + rnd() * 4, q = at(th, shore(th) + r); if (freeAt(q.x, q.z, m) && !keepClear(th)) return q; } return null; };
+  const cherry = spotNear(Math.PI + 0.35, 2.0, 1.0); // the south-west side
+  let petals = null;
+  if (cherry) {
+    const g = new THREE.Group(); g.position.set(cherry.x, H(cherry.x, cherry.z), cherry.z); scene.add(g);
+    const bark = mat('#8a5a3a'); g.add(mesh(new THREE.CylinderGeometry(0.13, 0.2, 1.6, 6), bark, 0, 0.8, 0));
+    const br = mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.8, 5), bark, 0.25, 1.5, 0); br.rotation.z = -0.6; g.add(br);
+    for (const [x, y, z, r, c] of [[0, 2.15, 0, 0.95, '#ffb7d0'], [0.6, 2.0, 0.3, 0.7, '#ffc8dc'], [-0.5, 1.95, -0.2, 0.72, '#ff9ec0'], [0.1, 2.6, -0.3, 0.6, '#ffd6e6']]) { const b = mesh(new THREE.IcosahedronGeometry(r, 1), mat(c), x, y, z); g.add(b); }
+    colliders.push({ x: cherry.x, z: cherry.z, r: 0.4, nonav: true });
+    const N = 40, pp = new Float32Array(N * 3), pv = new Float32Array(N * 3);
+    const pgeo = new THREE.BufferGeometry(); pgeo.setAttribute('position', new THREE.BufferAttribute(pp, 3));
+    const pts = new THREE.Points(pgeo, new THREE.PointsMaterial({ color: 0xffb7d0, size: 0.09, transparent: true, opacity: 0.9, depthWrite: false })); pts.frustumCulled = false; scene.add(pts);
+    const respawn = (i, y0) => { const a = rnd() * TAU, r = rnd() * 1.1; pp[i * 3] = cherry.x + Math.cos(a) * r; pp[i * 3 + 1] = y0 ?? 1.8 + rnd() * 0.8 + H(cherry.x, cherry.z); pp[i * 3 + 2] = cherry.z + Math.sin(a) * r; pv[i * 3] = 0.15 + rnd() * 0.2; pv[i * 3 + 2] = (rnd() - 0.5) * 0.2; };
+    for (let i = 0; i < N; i++) respawn(i, H(cherry.x, cherry.z) + rnd() * 2.6);
+    petals = { N, pp, pv, pgeo, respawn };
+  }
+  for (const th0 of [-0.9, 2.0]) { const q = spotNear(th0, 1.5, 0.75); if (!q) continue; const g = new THREE.Group(); g.position.set(q.x, H(q.x, q.z), q.z); scene.add(g); for (const [x, z, r] of [[0, 0, 0.5], [0.4, 0.2, 0.38], [-0.35, 0.15, 0.36]]) g.add(mesh(new THREE.IcosahedronGeometry(r, 1), mat('#6fb84a'), x, r * 0.85, z)); colliders.push({ x: q.x, z: q.z, r: 0.55, nonav: true }); }
+  // ---- the dock: planks on posts from the bank out over the water, low railings, a lantern at the end
+  const dockDeck = addDeck(D.a[0], D.a[1], D.b[0], D.b[1], D.ya, D.yb, D.hw);
+  LINKS.push({ a: dockDeck, b: -1, x: D.a[0] - Math.sin(dockDir) * 0.5, z: D.a[1] - Math.cos(dockDir) * 0.5 });
+  const dg = new THREE.Group(); dg.position.set(D.a[0], 0, D.a[1]); dg.rotation.y = dockDir; scene.add(dg);
+  const len = Math.hypot(D.b[0] - D.a[0], D.b[1] - D.a[1]);
+  for (let z = 0.15; z < len; z += 0.34) dg.add(mesh(new THREE.BoxGeometry(D.hw * 2 + 0.1, 0.07, 0.3), Math.round(z / 0.34) % 3 ? M.wood : mat('#a9774f'), 0, dYAt(z / len) - 0.035, z));
+  for (let z = 0.5; z <= len + 0.01; z += 1.0) for (const x of [-D.hw, D.hw]) { const wx = D.a[0] + Math.sin(dockDir) * z + Math.cos(dockDir) * x, wz = D.a[1] + Math.cos(dockDir) * z - Math.sin(dockDir) * x, y0 = dYAt(z / len), gh = Math.min(H(wx, wz), y0 - 0.2); dg.add(mesh(new THREE.CylinderGeometry(0.06, 0.07, y0 - gh + 0.45, 5), M.woodDark, x, (y0 + gh + 0.45) / 2 - 0.02, z)); }
+  for (const x of [-D.hw, D.hw]) { const rl = mesh(new THREE.BoxGeometry(0.05, 0.05, len - 0.5), M.wood, x, (dYAt(0.1) + dYAt(1)) / 2 + 0.43, len / 2 + 0.25); rl.rotation.x = Math.atan2(D.ya - D.yb, len); dg.add(rl); }
+  dg.add(mesh(new THREE.BoxGeometry(0.08, 1.0, 0.08), M.woodDark, D.hw, D.yb + 0.5, len - 0.05));
+  const lan = mesh(new THREE.BoxGeometry(0.18, 0.22, 0.18), M.lantern, D.hw, D.yb + 1.12, len - 0.05); lan.castShadow = false; dg.add(lan);
+  { const roof = mesh(new THREE.ConeGeometry(0.15, 0.12, 4), M.woodDark, D.hw, D.yb + 1.29, len - 0.05); roof.rotation.y = Math.PI / 4; dg.add(roof); }
+  dg.updateMatrixWorld(true); const lanW = lan.getWorldPosition(new THREE.Vector3()); lanternAt.copy(lanW);
+  wmat.uniforms.uLampAt.value.set(lanW.x - PX, lanW.z - PZ);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 })); glow.position.copy(lanW); glow.scale.set(1.5, 1.5, 1); scene.add(glow);
+  lampData.push({ pos: lanW.clone(), light: null, glow });
+  const click = new THREE.Mesh(new THREE.BoxGeometry(D.hw * 2, 0.1, len), new THREE.MeshBasicMaterial({ visible: false })); click.position.set((D.a[0] + D.b[0]) / 2, (D.ya + D.yb) / 2, (D.a[1] + D.b[1]) / 2); click.rotation.x = 0; click.rotation.y = dockDir; click.userData.deck = dockDeck; scene.add(click); deckClicks.push(click);
+  // ---- koi and ducks: where they are follows from the shared seed and the shared clock
+  const koiCols = [['#ff8a3a', '#fffaf0'], ['#fffaf0', '#ff7a4a'], ['#f6c84c', '#fffaf0'], ['#ff9a5a', '#2b2b3a']];
+  const kois = koiCols.map(([c1, c2], i) => {
+    const g = new THREE.Group(), body = mesh(new THREE.SphereGeometry(0.12, 8, 6), mat(c1, { flatShading: false })); body.scale.set(0.6, 0.45, 1.6); body.castShadow = false; g.add(body);
+    const spot = mesh(new THREE.SphereGeometry(0.07, 6, 4), mat(c2, { flatShading: false }), 0, 0.03, 0.03); spot.scale.set(0.8, 0.5, 1.3); spot.castShadow = false; g.add(spot);
+    const tail = mesh(new THREE.ConeGeometry(0.09, 0.16, 4), mat(c1, { flatShading: false }), 0, 0, -0.22); tail.rotation.x = -Math.PI / 2; tail.scale.x = 0.25; tail.castShadow = false; g.add(tail);
+    scene.add(g); return { g, tail, i };
+  });
+  const makeDuck = (small) => {
+    const g = new THREE.Group(), s = small ? 0.55 : 1, white = mat(small ? '#ffe680' : '#fffaf0', { flatShading: false }), bill = mat('#ffa23a');
+    const body = mesh(new THREE.SphereGeometry(0.2 * s, 10, 8), white, 0, 0.1 * s, 0); body.scale.set(0.85, 0.75, 1.15); g.add(body);
+    const tailB = mesh(new THREE.ConeGeometry(0.08 * s, 0.14 * s, 5), white, 0, 0.16 * s, -0.22 * s); tailB.rotation.x = -2.2; g.add(tailB);
+    const neck = new THREE.Group(); neck.position.set(0, 0.2 * s, 0.14 * s); g.add(neck);
+    const head = mesh(new THREE.SphereGeometry(0.11 * s, 10, 8), small ? white : mat('#5fae7a', { flatShading: false }), 0, 0.1 * s, 0.02 * s); neck.add(head);
+    const b = mesh(new THREE.BoxGeometry(0.09 * s, 0.03 * s, 0.1 * s), bill, 0, 0.08 * s, 0.13 * s); neck.add(b);
+    for (const x of [-0.05, 0.05]) neck.add(mesh(new THREE.SphereGeometry(0.018 * s, 5, 4), mat('#2b211c'), x * s, 0.13 * s, 0.1 * s));
+    if (!small) for (const sx of [-1, 1]) { const w = mesh(new THREE.SphereGeometry(0.1, 8, 6), mat('#e8e2d4', { flatShading: false }), sx * 0.15, 0.13, -0.03); w.scale.set(0.35, 0.6, 1.1); g.add(w); }
+    scene.add(g); return { g, neck, small, wakeT: 0 };
+  };
+  const ducks = [makeDuck(false), makeDuck(false), makeDuck(false)], duckling = makeDuck(true);
+  // a smooth loop inside the pond for swimmer i (u = phase 0..1): a wobbly ellipse kept inside the kidney outline
+  const loopAt = (i, u, inset) => {
+    const a = u * TAU, wob = 0.18 * Math.sin(a * 2 + i * 1.7 + (pondSeed % 97) * 0.13), th = a + i * 1.3 + (pondSeed % 13) * 0.4;
+    const r = (shore(th) - inset) * (0.55 + wob + 0.12 * Math.sin(a * 3 + i)); return { x: PX + Math.cos(th) * r, z: PZ + Math.sin(th) * r };
+  };
+  const nearPlayers = () => [...(myRoom === null ? [player] : []), ...[...remotes.values()].filter((r) => !r.room).map((r) => r.player)].filter((c) => Math.hypot(c.position.x - PX, c.position.z - PZ) < P.r + 2.2);
+  // ---- dragonflies and butterflies by day, fireflies at dusk and night
+  const flyers = [0, 1, 2, 3].map((k) => { const g = new THREE.Group(), dragon = k < 2, c = mat(dragon ? '#5fc0e8' : ['#ffb3c8', '#f6d55c'][k - 2]); const bd = mesh(new THREE.CapsuleGeometry(0.02, dragon ? 0.22 : 0.08, 2, 4), dragon ? c : mat('#5a4632')); bd.rotation.x = Math.PI / 2; g.add(bd); const wings = []; for (const s of [-1, 1]) { const w = mesh(new THREE.PlaneGeometry(dragon ? 0.2 : 0.14, dragon ? 0.06 : 0.12), new THREE.MeshBasicMaterial({ color: dragon ? 0xdff6ff : c.color, transparent: true, opacity: dragon ? 0.6 : 0.95, side: THREE.DoubleSide }), s * (dragon ? 0.1 : 0.07), 0.01, 0); w.rotation.x = -Math.PI / 2; g.add(w); wings.push(w); } scene.add(g); return { g, wings, dragon, k }; });
+  const NF = 22, fpos = new Float32Array(NF * 3), fgeo = new THREE.BufferGeometry(); fgeo.setAttribute('position', new THREE.BufferAttribute(fpos, 3));
+  const fmat = new THREE.PointsMaterial({ map: glowTex, color: 0xfff27a, size: 0.32, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+  const fireflies = new THREE.Points(fgeo, fmat); fireflies.frustumCulled = false; scene.add(fireflies);
+  const ffSeed = Array.from({ length: NF }, (_, i) => ({ th: (i / NF) * TAU + rnd(), r: 0.2 + rnd() * 1.8, h: 0.4 + rnd() * 1.0, ph: rnd() * TAU }));
+  const _c = new THREE.Color();
+  const update = function (dt, time) {
+    const t = nowMs() / 1000, day = 1 - cur.lamp * 0.75, near = Math.hypot(player.position.x - PX, player.position.z - PZ) < 45 && myRoom === null;
+    wmat.uniforms.uTime.value = time; wmat.uniforms.uDay.value = day; wmat.uniforms.uLamp.value = cur.lamp;
+    wmat.uniforms.uSky.value.copy(_c.copy(cur.top).lerp(cur.fog, 0.4));
+    if (!near) return; // nothing to animate when nobody's looking
+    for (const s of swayers) s.g.rotation.z = Math.sin(time * 1.3 + s.ph) * 0.05;
+    for (const p of pads) p.g.position.y = 0.085 + Math.sin(time * 1.1 + p.ph) * 0.006;
+    const watchers = nearPlayers();
+    // koi: slow loops just under the surface; a player at the shore sends them gliding off deeper
+    for (const k of kois) {
+      const per = 26 + k.i * 5, u = ((t / per + k.i * 0.27 + (pondSeed % 1000) / 1000) % 1 + 1) % 1, a = loopAt(k.i, u, 0.7), b = loopAt(k.i, u + 0.004, 0.7);
+      let shy = 0; for (const c of watchers) shy = Math.max(shy, 1 - Math.hypot(c.position.x - a.x, c.position.z - a.z) / 2.5);
+      k.g.position.set(a.x, 0.02 - shy * 0.22, a.z); k.g.rotation.y = Math.atan2(b.x - a.x, b.z - a.z);
+      k.tail.rotation.y = Math.sin(time * (6 + shy * 8) + k.i) * 0.5;
+    }
+    // ducks: paddling round, now and then dipping their heads; one has a duckling paddling behind
+    ducks.forEach((d, i) => {
+      const per = 48 + i * 9, uOf = (tt) => ((tt / per + i * 0.33 + (pondSeed % 777) / 777) % 1 + 1) % 1, a = loopAt(i + 5, uOf(t), 0.55), b = loopAt(i + 5, uOf(t + 0.3), 0.55);
+      let ax = a.x, az = a.z; for (const c of watchers) { const dx = a.x - c.position.x, dz = a.z - c.position.z, dd = Math.hypot(dx, dz); if (dd < 2.2) { ax += (dx / dd) * (2.2 - dd) * 0.35; az += (dz / dd) * (2.2 - dd) * 0.35; } } // paddle away a little
+      d.g.position.x = lerp(d.g.position.x || ax, ax, Math.min(1, dt * 3)); d.g.position.z = lerp(d.g.position.z || az, az, Math.min(1, dt * 3)); d.g.position.y = 0.06 + Math.sin(time * 2 + i) * 0.012;
+      d.g.rotation.y = Math.atan2(b.x - a.x, b.z - a.z);
+      const dip = ((t + i * 7 + (pondSeed % 11)) % 11) < 1.2; d.neck.rotation.x = lerp(d.neck.rotation.x, dip ? 1.9 : 0, Math.min(1, dt * 6)); d.g.rotation.x = dip ? 0.35 : 0;
+      d.wakeT -= dt; if (d.wakeT <= 0) { d.wakeT = 1.0; ripple(d.g.position.x - Math.sin(d.g.rotation.y) * 0.25, d.g.position.z - Math.cos(d.g.rotation.y) * 0.25, 0.22); }
+      if (i === 0) { const c = loopAt(5, uOf(t - 1.6), 0.55), c2 = loopAt(5, uOf(t - 1.3), 0.55); duckling.g.position.set(c.x, 0.05 + Math.sin(time * 3) * 0.01, c.z); duckling.g.rotation.y = Math.atan2(c2.x - c.x, c2.z - c.z); }
+    });
+    // petals drifting down from the cherry tree
+    if (petals) { const { N, pp, pv, pgeo, respawn } = petals; for (let i = 0; i < N; i++) { pp[i * 3] += (pv[i * 3] + Math.sin(time + i) * 0.1) * dt; pp[i * 3 + 1] -= (0.25 + (i % 5) * 0.04) * dt; pp[i * 3 + 2] += (pv[i * 3 + 2] + Math.cos(time * 0.8 + i) * 0.1) * dt; if (pp[i * 3 + 1] < H(pp[i * 3], pp[i * 3 + 2]) + 0.03) respawn(i); } pgeo.attributes.position.needsUpdate = true; }
+    // insects
+    const dayOn = cur.lamp < 0.5;
+    for (const f of flyers) {
+      f.g.visible = dayOn;
+      if (!dayOn) continue;
+      const ph = t * (f.dragon ? 0.35 : 0.22) + f.k * 1.7, th = ph + Math.sin(ph * 2.3) * 0.6, r = shore(th) * (f.dragon ? 0.75 : 1.25) + Math.sin(ph * 3.1) * 0.4;
+      const x = PX + Math.cos(th) * r, z = PZ + Math.sin(th) * r, y = (f.dragon ? 0.55 : 0.8) + Math.sin(t * (f.dragon ? 2 : 3) + f.k) * 0.15 + Math.max(0, H(x, z));
+      f.g.rotation.y = Math.atan2(x - f.g.position.x, z - f.g.position.z) || f.g.rotation.y; f.g.position.set(x, y, z);
+      const flap = Math.sin(time * (f.dragon ? 40 : 14) + f.k); f.wings[0].rotation.y = flap * (f.dragon ? 0.3 : 0.9); f.wings[1].rotation.y = -flap * (f.dragon ? 0.3 : 0.9);
+    }
+    fmat.opacity = cur.lamp * 0.95;
+    if (cur.lamp > 0.02) { for (let i = 0; i < NF; i++) { const s = ffSeed[i], th = s.th + Math.sin(t * 0.2 + s.ph) * 0.4, r = shore(th) + s.r * Math.sin(t * 0.13 + s.ph * 2); fpos[i * 3] = PX + Math.cos(th) * r; fpos[i * 3 + 1] = s.h + Math.sin(t * 0.9 + s.ph) * 0.25 + Math.max(0, H(fpos[i * 3], fpos[i * 3 + 2])); fpos[i * 3 + 2] = PZ + Math.sin(th) * r; } fgeo.attributes.position.needsUpdate = true; }
+  };
+  update.animals = () => [...kois.map((k) => k.g), ...ducks.map((d) => d.g), duckling.g];
+  return update;
+})();
 const PROTOCOL = 9; // must match PROTOCOL in server.js
 const playersEl = document.getElementById('players');
 const net = {
@@ -7995,6 +8223,7 @@ function handleNet(m) {
     if (m.banana) applyBanana(m.banana);
     if (m.volley) { volLocal = null; applyVolley(m.volley); }
     if (Number.isFinite(m.dolphinSeed)) dolphinSeed = m.dolphinSeed;
+    if (Number.isFinite(m.pondSeed)) pondSeed = m.pondSeed;
     const treeState = new Map(m.trees || []), bugState = new Map((m.bugs || []).map(([id, gen, at]) => [id, { gen, at }]));
     for (const t of fruitTrees) t.readyAt = treeState.get(t.id) || 0;
     for (const b of bugs) { const s = bugState.get(b.id) || { gen: 0, at: 0 }; setBugState(b, s.gen, s.at); }
@@ -8180,6 +8409,7 @@ function frame(now) {
   updateBikes(dt, elapsed);
   updateBalloon(dt, elapsed);
   updateBananas(dt, elapsed);
+  pond(dt, elapsed);
   dolphins(dt, elapsed);
   buoys(elapsed);
   festival(elapsed);

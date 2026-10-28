@@ -25,11 +25,14 @@ const SELL_PRICES = {
   scarab: 35, // desert
   lizard: 28, // desert
   clownfish: 22, puffer: 30, // fished off the beach
+  koi: 26, carp: 16, // fished in the home pond
 };
 // what a fishing catch turns out to be, rolled here on the server (chances add up to 1)
 const CATCH_TABLE = [['smallfish', 0.6], ['bigfish', 0.25], ['shell', 0.075], ['star', 0.075]];
 // fishing from the beach (the same test as atBeach in main.js) adds the beach's own catches
 const BEACH_CATCH_TABLE = [['smallfish', 0.33], ['clownfish', 0.22], ['puffer', 0.15], ['bigfish', 0.13], ['crab', 0.1], ['star', 0.07]];
+// fishing at the home pond (from its dock or banks: the same test as atPond in island.js)
+const POND_CATCH_TABLE = [['carp', 0.35], ['koi', 0.25], ['smallfish', 0.25], ['crab', 0.15]];
 const BEACH_AREA = require('./island.js').LAYOUT.areas.beach;
 const atBeach = (p) => Number.isFinite(p.x) && p.x < -43 && ((p.x - BEACH_AREA.x) / BEACH_AREA.rx) ** 2 + ((p.z - BEACH_AREA.z) / BEACH_AREA.rz) ** 2 < 2.56;
 const START_COINS = 50; // every account starts with these (older accounts get them the first time they log in)
@@ -240,6 +243,7 @@ setInterval(() => {
   if (volleyDirty) { volleyDirty = false; broadcast(volleyMsg()); }
 }, 50);
 const DOLPHIN_SEED = Math.floor(Math.random() * 1e9); // the dolphins' shared jump schedule
+const POND_SEED = Math.floor(Math.random() * 1e9); // where the home pond's koi and ducks swim (everyone sees the same)
 const wheelAngle = (t) => ((t % RIDES.ferris.periodMs) / RIDES.ferris.periodMs) * Math.PI * 2;
 // boards p onto a ride; returns '' when it worked, or the reason it didn't
 function boardRide(p, kind, want) {
@@ -365,7 +369,7 @@ function writeAccounts() {
 setInterval(() => { for (const p of players.values()) storeProgress(p); writeAccounts(); }, 30000); // autosave
 
 const TOOLS = new Set(['axe', 'can', 'rod', 'net']);
-const POCKET_KINDS = ['shell', 'star', 'coconut', 'mango', 'pineapple', 'smallfish', 'bigfish', 'carrot', 'tomato', 'cabbage', 'flower', 'butterfly', 'beetle', 'dragonfly', 'scarab', 'lizard', 'crab', 'conch', 'clownfish', 'puffer'];
+const POCKET_KINDS = ['shell', 'star', 'coconut', 'mango', 'pineapple', 'smallfish', 'bigfish', 'carrot', 'tomato', 'cabbage', 'flower', 'butterfly', 'beetle', 'dragonfly', 'scarab', 'lizard', 'crab', 'conch', 'clownfish', 'puffer', 'koi', 'carp'];
 const NAME_RE = /^[A-Za-z0-9 _.-]{3,16}$/;
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const scrypt = (password, salt) => new Promise((resolve, reject) => crypto.scrypt(password, salt, 64, (err, key) => (err ? reject(err) : resolve(key))));
@@ -517,7 +521,7 @@ wss.on('connection', (ws) => {
       gardens: gardenList(),
       islandWatered, islandHarvested,
       garden: { growMs: GARDEN_GROW_MS, wetMs: GARDEN_WET_MS },
-      seats: [...seats.entries()], swing, rides: ridesMsg(), bikes: [...bikes.values()].map(bikePub), balloon: balloonMsg(), banana: bananaMsg(), volley: volleyMsg(), dolphinSeed: DOLPHIN_SEED,
+      seats: [...seats.entries()], swing, rides: ridesMsg(), bikes: [...bikes.values()].map(bikePub), balloon: balloonMsg(), banana: bananaMsg(), volley: volleyMsg(), dolphinSeed: DOLPHIN_SEED, pondSeed: POND_SEED,
       bo: boMsg(), sellPrices: SELL_PRICES,
     });
     if (newHouse) broadcast({ t: 'house', plot: acc.plot, name: acc.name, roof: acc.roof }, ws);
@@ -786,7 +790,7 @@ wss.on('connection', (ws) => {
       let kind = null;
       if (age >= 3000 && age <= 13000) {
         let r = Math.random();
-        const table = atBeach(p) && !p.room ? BEACH_CATCH_TABLE : CATCH_TABLE;
+        const table = p.room ? CATCH_TABLE : require('./island.js').atPond(p.x, p.z) ? POND_CATCH_TABLE : atBeach(p) ? BEACH_CATCH_TABLE : CATCH_TABLE;
         kind = table[table.length - 1][0];
         for (const [k, chance] of table) { if (r < chance) { kind = k; break; } r -= chance; }
         p.pocket[kind]++;

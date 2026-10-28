@@ -513,6 +513,16 @@ export function volleyEngine(hooks) {
 // whether a side is one hit from winning
 export const volleyMatchPoint = (score, side) => { const s = score[side] + 1, o = score[1 - side]; return s >= VOLLEY.toWin && (s - o >= 2 || s >= VOLLEY.cap); };
 
+// the home pond's outline: a soft kidney shape, its radius along direction th (atan2 of z, x from the pond's middle).
+// Long axis toward the river mouth (north-west) and the dock (south-east), a gentle dip on the north-east side. Never
+// wider than the old round pond (LAYOUT.pond.r), so the banks, paths and everything round it stay where they were.
+export function pondR(th) {
+  const r = LAYOUT.pond.r, s = Math.sin(th - (3 * Math.PI) / 4), c = Math.cos(th - Math.PI / 4);
+  return r * (1 - 0.13 * s * s - 0.17 * Math.pow(Math.max(0, c), 3));
+}
+export const POND_DOCK = { a: [-10.15, -24.65], b: [-12.45, -23.05], ya: 0.87, yb: 0.6, hw: 0.55 }; // the little dock: from the lawn (bank end) gently down over the water
+export const atPond = (x, z) => Number.isFinite(x) && Math.hypot(x - LAYOUT.pond.x, z - LAYOUT.pond.z) < LAYOUT.pond.r + 3.2; // fishing here gives pond catches
+
 export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
   const C = (h) => new THREE.Color(h);
   const L = LAYOUT;
@@ -602,7 +612,7 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
     }
     const hd = Math.hypot(x - HILL.x, z - HILL.z);
     if (hd < HILL.r) h += HILL.h * smooth(HILL.r, HILL.r * 0.25, hd);
-    const pd = Math.hypot(x - POND.x, z - POND.z);
+    const pr = Math.hypot(x - POND.x, z - POND.z), pd = pr < POND.r + 0.55 ? pr * lerp(POND.r / pondR(Math.atan2(z - POND.z, x - POND.x)), 1, smooth(POND.r - 0.6, POND.r + 0.55, pr)) : pr; // the kidney shape (the old round banks from r + 0.55 out)
     if (pd < POND.r + 2) h = lerp(h, -0.8, smooth(POND.r + 0.9, POND.r - 1.2, pd));
     const rd = riverDist(x, z); // soft sandy banks sloping down into the river bed
     if (rd < L.river.half + 3) h = lerp(h, -0.65, smooth(L.river.half + 2.3, L.river.half - 0.2, rd));
@@ -970,16 +980,10 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
       return g;
     })();
 
-    // the pond (left): lily pads and a tiny jetty on its coast side
+    // the pond (left): its plants, animals and dock are built in main.js now. The old lily pads drew these random
+    // numbers; they're still drawn (and not used) so everything placed after keeps exactly its old spot.
     {
-      const lily = mat('#5fae4a');
-      for (let i = 0; i < 6; i++) {
-        const a = rr(0, TAU), d = rr(0.6, POND.r - 1.3);
-        const pad = mesh(new THREE.CylinderGeometry(rr(0.22, 0.34), rr(0.22, 0.34), 0.03, 8), lily, POND.x + Math.cos(a) * d, 0.04, POND.z + Math.sin(a) * d); pad.castShadow = false; scene.add(pad);
-        if (rand() < 0.4) scene.add(mesh(new THREE.SphereGeometry(0.07, 6, 4), mat('#ffb3c8'), pad.position.x, 0.1, pad.position.z));
-      }
-      const jetty = new THREE.Group(); jetty.position.set(POND.x - POND.r + 0.6, 0.15, POND.z); jetty.rotation.y = -Math.PI / 2; scene.add(jetty);
-      for (let i = 0; i < 4; i++) jetty.add(mesh(new THREE.BoxGeometry(0.9, 0.08, 0.32), i % 2 ? M.wood : mat('#a9774f'), 0, 0, -i * 0.36));
+      for (let i = 0; i < 6; i++) { rr(0, TAU); rr(0.6, POND.r - 1.3); rr(0.22, 0.34); rr(0.22, 0.34); rand(); }
       avoid.push({ x: POND.x, z: POND.z, r: POND.r + 0.6 });
     }
 
