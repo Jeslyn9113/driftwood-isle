@@ -160,7 +160,7 @@ export const LAYOUT = {
       stage: [11.5, -1, 9.5],
       cabins: [{ x: -47, z: 11.5, face: -Math.PI / 2, stairs: 1 }],
       bridges: [],
-      volley: { x: -55, z: 18 },
+      volley: { x: -55, z: 18 }, // where the old net stood (kept so the beach scenery lays out the same); the court is VOLLEY
       surf: [[-51, 16], [-50.2, 16.4], [-49.4, 16.2]],
       parasols: [[-64.5, -11.5], [-52, -14.5]],
     },
@@ -329,6 +329,189 @@ export function bananaReturnCtrl(course, bi, d) {
   const home = Math.hypot(tail[0][0] - here.x, tail[0][1] - here.z) > 14 ? [turn] : [];
   return [q(d - 8), q(d - 4), q(d), ...home, ...tail];
 }
+
+// ---------------------------------------------------------------- beach volleyball: the court and the match rules
+// One court on the beach. The net runs along x through (x, z); side 0 ("Left") is the half with smaller z, side 1
+// ("Right") the other. The ball flies in parabolas the server works out at every hit (segments with a start time on
+// the shared clock), so every client draws exactly the same ball. The same engine runs the match on the server and,
+// on the solo island, in the browser.
+export const VOLLEY = { x: -55, z: 15.5, hw: 2.6, hl: 4, net: 2.15, r: 0.22, g: 7, reach: 1.9, toWin: 7, cap: 9 };
+const VS = (side) => (side ? 1 : -1); // which way a side's half lies from the net (along z)
+export const volleyStart = (side) => ({ x: VOLLEY.x, z: VOLLEY.z + VS(side) * 2.6 });
+export const volleyInCourt = (x, z) => Math.abs(x - VOLLEY.x) <= VOLLEY.hw + VOLLEY.r && Math.abs(z - VOLLEY.z) <= VOLLEY.hl + VOLLEY.r;
+export const volleyHalfOf = (z) => (z < VOLLEY.z ? 0 : 1);
+// where you may stand while playing: your own half plus a little room behind and beside the lines, never across the net
+export function volleyClamp(side, x, z) {
+  const s = VS(side), d = Math.min(VOLLEY.hl + 1.4, Math.max(0.45, (z - VOLLEY.z) * s));
+  return { x: Math.min(VOLLEY.x + VOLLEY.hw + 1.4, Math.max(VOLLEY.x - VOLLEY.hw - 1.4, x)), z: VOLLEY.z + d * s };
+}
+// a flight from p with velocity v starting at t0 (ms): until it lands (y = r), then a few bounces on the sand
+const landAfter = (y, vy) => (vy + Math.sqrt(vy * vy + 2 * VOLLEY.g * Math.max(0, y - VOLLEY.r))) / VOLLEY.g;
+function flightAt(f, t) { // seconds after the flight started
+  const g = VOLLEY.g;
+  let p = f.p, v = f.v, u = t;
+  for (let k = 0; k < 5; k++) {
+    const T = landAfter(p[1], v[1]);
+    if (u <= T || k === 4) { u = Math.min(u, T); return [p[0] + v[0] * u, p[1] + v[1] * u - (g * u * u) / 2, p[2] + v[2] * u]; }
+    const vyL = v[1] - g * T, q = [p[0] + v[0] * T, VOLLEY.r, p[2] + v[2] * T];
+    u -= T; p = q; v = [v[0] * 0.5, -vyL * 0.42, v[2] * 0.5];
+    if (v[1] < 0.6) { const roll = Math.min(u, 0.6); return [p[0] + v[0] * roll * (1 - roll / 1.2), VOLLEY.r, p[2] + v[2] * roll * (1 - roll / 1.2)]; }
+  }
+  return p;
+}
+// the ball at time t (ms): ball = { segs: [{ p, v, t0, end }], rest: [x, y, z] }
+export function volleyBallAt(ball, t) {
+  if (!ball || !ball.segs || !ball.segs.length) return ball && ball.rest ? ball.rest : [VOLLEY.x, VOLLEY.r, VOLLEY.z - 1];
+  let s = ball.segs[0];
+  for (const q of ball.segs) if (t >= q.t0) s = q;
+  const u = Math.max(0, (t - s.t0) / 1000);
+  if (s.end != null && u > s.end) { const g = VOLLEY.g, e = s.end; return [s.p[0] + s.v[0] * e, s.p[1] + s.v[1] * e - (g * e * e) / 2, s.p[2] + s.v[2] * e]; }
+  return flightAt(s, u);
+}
+// launch from p toward (tx, tz) taking T seconds; returns the flight segments, where and when it lands
+function launch(p, tx, tz, T, now, fixNet) {
+  const g = VOLLEY.g;
+  for (let k = 0; k < 8; k++, T += 0.12) {
+    const v = [(tx - p[0]) / T, (VOLLEY.r - p[1] + (g * T * T) / 2) / T, (tz - p[2]) / T];
+    const tn = Math.abs(v[2]) > 1e-6 ? (VOLLEY.z - p[2]) / v[2] : -1, yn = tn > 0 && tn < T ? p[1] + v[1] * tn - (g * tn * tn) / 2 : 99;
+    const xn = p[0] + v[0] * Math.max(0, tn), netHit = yn < VOLLEY.net + VOLLEY.r && Math.abs(xn - VOLLEY.x) <= VOLLEY.hw + 0.4;
+    if (netHit && fixNet && k < 7) continue; // a good hit always clears the net: a higher arc
+    if (!netHit) return { segs: [{ p, v, t0: now }], land: { x: tx, z: tz, t: now + T * 1000 }, net: false };
+    // into the net: it stops there and drops back down on the hitter's side
+    const q = [xn, yn, VOLLEY.z - Math.sign(v[2]) * 0.25], v2 = [v[0] * 0.15, Math.min(0, v[1] - g * tn) * 0.3, -v[2] * 0.12], T2 = landAfter(q[1], v2[1]);
+    return { segs: [{ p, v, t0: now, end: tn }, { p: q, v: v2, t0: now + tn * 1000 }], land: { x: q[0] + v2[0] * T2, z: q[2] + v2[2] * T2, t: now + (tn + T2) * 1000 }, net: true };
+  }
+}
+// ---- the match. hooks: now() ms, emit() after any change, posOf(id) -> { x, z } | null, nameOf(id), rand()
+export function volleyEngine(hooks) {
+  const rand = hooks.rand || Math.random;
+  const S = { st: 'idle', sides: [null, null], names: ['', ''], score: [0, 0], serve: 0, ball: { segs: [], rest: [VOLLEY.x, VOLLEY.r, VOLLEY.z - 1.2] }, land: null, last: -1, hit: null, until: 0, winner: -1, why: '', bot: null, join: [null, null], seq: 0 };
+  const human = (i) => S.sides[i] !== null && S.sides[i] !== 'bot';
+  const live = () => ['count', 'serve', 'rally', 'point'].includes(S.st);
+  const changed = () => { S.seq++; hooks.emit(); };
+  const sideOf = (id) => S.sides.indexOf(id);
+  const reset = () => { S.score = [0, 0]; S.serve = rand() < 0.5 ? 0 : 1; S.last = -1; S.winner = -1; S.why = ''; S.hit = null; S.land = null; };
+  const startCount = (now) => { reset(); S.st = 'count'; S.until = now + 3200; S.ball = { segs: [], rest: [VOLLEY.x, VOLLEY.r, VOLLEY.z - 1.2] }; };
+  const holdBall = () => { // the server holds the ball, waiting to serve
+    S.st = 'serve'; S.last = -1; S.land = null;
+    const p = S.sides[S.serve] === 'bot' ? S.bot : hooks.posOf(S.sides[S.serve]) || volleyStart(S.serve);
+    S.ball = { segs: [], rest: [p.x, 2.0, p.z], held: S.serve };
+  };
+  const botIn = (side) => { S.sides[side] = 'bot'; S.names[side] = 'Bonbon'; const st = volleyStart(side); S.bot = { x: st.x, z: st.z, side, think: 0 }; };
+  const clearSide = (i) => { if (S.sides[i] === 'bot') S.bot = null; S.sides[i] = null; S.names[i] = ''; };
+  function hitBall(side, at, tx, tz, q, now) {
+    const s = VS(1 - side), from = S.st === 'serve' ? [S.ball.rest[0], 2.0, S.ball.rest[2]] : volleyBallAt(S.ball, at);
+    // aim: somewhere on the other half (the middle if no aim), a little off for an ordinary hit, short for a weak one
+    let ax = Number.isFinite(tx) ? tx : VOLLEY.x, az = Number.isFinite(tz) ? tz : VOLLEY.z + s * VOLLEY.hl * 0.55;
+    ax = Math.min(VOLLEY.x + VOLLEY.hw - 0.2, Math.max(VOLLEY.x - VOLLEY.hw + 0.2, ax));
+    let d = Math.min(VOLLEY.hl - 0.25, Math.max(0.9, (az - VOLLEY.z) * s));
+    const err = q === 'great' ? 0.15 : q === 'ok' ? 0.55 : 1.0;
+    if (q === 'weak') d *= 0.55;
+    ax += (rand() - 0.5) * 2 * err; d += (rand() - 0.5) * 2 * err * (q === 'weak' ? 1.4 : 1);
+    const T = q === 'great' ? 0.95 : q === 'ok' ? 1.25 : 1.5;
+    const f = launch(from, ax, VOLLEY.z + d * s, T, now, q !== 'weak');
+    S.ball = { segs: f.segs }; S.land = f.land; S.last = side; S.st = 'rally';
+    S.hit = { side, at: now, q, serve: from[1] >= 1.99 && !S.hit };
+  }
+  const quality = (y) => { const e = Math.abs(y - 1.75); return e < 0.32 ? 'great' : e < 0.85 ? 'ok' : 'weak'; };
+  const api = {
+    S, sideOf,
+    join(id, side, name) { // a free side, or one the practice bot holds (it hands over after this point)
+      if (!(side === 0 || side === 1) || sideOf(id) >= 0) return 'busy';
+      if (human(side)) return 'taken';
+      const now = hooks.now();
+      if (S.sides[side] === 'bot') {
+        if (live() && S.st !== 'count') { S.join[side] = { id, name }; changed(); return null; }
+        clearSide(side);
+      }
+      S.sides[side] = id; S.names[side] = name || 'Player';
+      if (human(0) && human(1)) startCount(now); else if (S.st === 'idle' || S.st === 'over') S.st = 'wait';
+      if (!human(1 - side) && S.sides[1 - side] === 'bot' && S.st === 'count') { /* still counting down with the bot */ }
+      changed(); return null;
+    },
+    practice(id) {
+      const i = sideOf(id); if (i < 0 || S.sides[1 - i] !== null || live()) return 'no';
+      botIn(1 - i); startCount(hooks.now()); changed(); return null;
+    },
+    again(id) {
+      const i = sideOf(id); if (i < 0 || live() || S.sides[1 - i] === null) return 'no';
+      startCount(hooks.now()); changed(); return null;
+    },
+    leave(id) {
+      const i = sideOf(id);
+      for (const k of [0, 1]) if (S.join[k] && S.join[k].id === id) { S.join[k] = null; changed(); }
+      if (i < 0) return;
+      const was = live();
+      clearSide(i);
+      if (was && human(1 - i)) { S.st = 'over'; S.winner = 1 - i; S.why = 'left'; S.until = hooks.now() + 5000; S.ball = { segs: [], rest: volleyBallAt(S.ball, hooks.now()) }; S.ball.rest[1] = VOLLEY.r; }
+      else { if (S.sides[1 - i] === 'bot') clearSide(1 - i); S.st = S.sides[1 - i] !== null ? 'wait' : 'idle'; S.ball = { segs: [], rest: [VOLLEY.x, VOLLEY.r, VOLLEY.z - 1.2] }; }
+      changed();
+    },
+    hit(id, at, tx, tz) { // validated: your turn, the ball close to you, not your second touch in a row
+      const i = sideOf(id), now = hooks.now();
+      if (i < 0) return 'no';
+      const when = Number.isFinite(at) && at <= now + 50 && at >= now - 450 ? at : now;
+      if (S.st === 'serve') { if (S.serve !== i) return 'turn'; hitBall(i, when, tx, tz, 'ok', now); changed(); return null; }
+      if (S.st !== 'rally' || S.last === i) return 'turn';
+      const b = volleyBallAt(S.ball, when), me = hooks.posOf(id);
+      if (!me || b[1] < 0.3 || b[1] > 3.6) return 'reach';
+      if (Math.hypot(b[0] - me.x, b[2] - me.z) > VOLLEY.reach + 0.5) return 'reach';
+      if ((b[2] - VOLLEY.z) * VS(i) < -0.6) return 'reach'; // over on the other side of the net
+      if (when > S.land.t) return 'late';
+      hitBall(i, when, tx, tz, quality(b[1]), now); changed(); return null;
+    },
+    tick() {
+      const now = hooks.now();
+      if (S.st === 'count' && now >= S.until) { holdBall(); changed(); }
+      else if (S.st === 'rally' && now >= S.land.t) { // it's down: whose point?
+        const L = S.land, inside = volleyInCourt(L.x, L.z), loser = inside ? volleyHalfOf(L.z) : S.last, w = 1 - loser;
+        S.score[w]++; S.serve = w; S.st = 'point'; S.until = now + 2300; S.pointTo = w; S.out = !inside;
+        const sw = S.score[w], so = S.score[loser];
+        if (sw >= VOLLEY.toWin && (sw - so >= 2 || sw >= VOLLEY.cap)) { S.winner = w; S.why = 'won'; }
+        changed();
+      } else if (S.st === 'point' && now >= S.until) {
+        S.ball = { segs: [], rest: volleyBallAt(S.ball, now) };
+        if (S.winner >= 0) { S.st = 'over'; S.until = now + 5000; }
+        else {
+          let fresh = false;
+          for (const k of [0, 1]) if (S.join[k] && S.sides[k] === 'bot') { clearSide(k); S.sides[k] = S.join[k].id; S.names[k] = S.join[k].name; S.join[k] = null; fresh = true; }
+          if (fresh) startCount(now); else holdBall();
+        }
+        changed();
+      } else if (S.st === 'over' && now >= S.until) {
+        S.st = S.sides[0] !== null || S.sides[1] !== null ? 'wait' : 'idle';
+        for (const k of [0, 1]) if (S.join[k]) { if (S.sides[k] === 'bot') clearSide(k); if (S.sides[k] === null) { S.sides[k] = S.join[k].id; S.names[k] = S.join[k].name; } S.join[k] = null; }
+        if (S.sides.includes('bot') && !(human(0) || human(1))) { clearSide(S.sides.indexOf('bot')); S.st = 'idle'; }
+        changed();
+      }
+      // the practice bot: runs to where the ball will come down, bumps it back when it's at a nice height
+      const B = S.bot;
+      if (B) {
+        const side = B.side, s = VS(side), home = volleyStart(side);
+        let goal = home;
+        if (S.st === 'rally' && S.last !== side && S.land && volleyHalfOf(S.land.z) === side) goal = { x: S.land.x, z: S.land.z + s * 0.4 };
+        if (S.st === 'serve' && S.serve === side) goal = home;
+        const dx = goal.x - B.x, dz = goal.z - B.z, dd = Math.hypot(dx, dz), step = 2.7 * 0.05;
+        if (dd > 0.05) { const k = Math.min(1, step / dd); const c = volleyClamp(side, B.x + dx * k, B.z + dz * k); B.x = c.x; B.z = c.z; }
+        if (S.st === 'serve' && S.serve === side && now - (S.hit ? 0 : 0) > 0) {
+          B.think = B.think || now + 1300;
+          if (now >= B.think) { B.think = 0; S.ball.rest = [B.x, 2.0, B.z]; hitBall(side, now, VOLLEY.x + (rand() - 0.5) * 3, VOLLEY.z - s * (1.2 + rand() * 2.4), 'ok', now); changed(); }
+        } else if (S.st === 'rally' && S.last !== side) {
+          const b = volleyBallAt(S.ball, now), vyDown = volleyBallAt(S.ball, now + 50)[1] < b[1];
+          if (Math.hypot(b[0] - B.x, b[2] - B.z) < VOLLEY.reach && b[1] < 2.0 && b[1] > 1.2 && vyDown && (b[2] - VOLLEY.z) * s > 0) {
+            if (B.miss === undefined) B.miss = rand() < 0.22; // now and then it just misses (it's still learning)
+            if (!B.miss) { const r = rand(); hitBall(side, now, VOLLEY.x + (rand() - 0.5) * 4, VOLLEY.z - s * (1 + rand() * 2.8), r < 0.15 ? 'great' : r < 0.85 ? 'ok' : 'weak', now); B.miss = undefined; changed(); }
+          }
+        } else B.miss = undefined;
+        B.moving = dd > 0.05;
+      }
+    },
+    view() { return { st: S.st, sides: S.sides.map((s) => (s === 'bot' ? 'bot' : s)), names: S.names, score: S.score, serve: S.serve, ball: S.ball, land: S.land, last: S.last, hit: S.hit, until: S.until, winner: S.winner, why: S.why, pointTo: S.pointTo, out: S.out, bot: S.bot && { x: +S.bot.x.toFixed(2), z: +S.bot.z.toFixed(2), side: S.bot.side, m: S.bot.moving ? 1 : 0 }, join: S.join.map((j) => j && j.id), seq: S.seq }; },
+  };
+  return api;
+}
+// whether a side is one hit from winning
+export const volleyMatchPoint = (score, side) => { const s = score[side] + 1, o = score[1 - side]; return s >= VOLLEY.toWin && (s - o >= 2 || s >= VOLLEY.cap); };
 
 export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
   const C = (h) => new THREE.Color(h);

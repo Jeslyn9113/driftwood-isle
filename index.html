@@ -216,6 +216,25 @@
   #speedFx { position: fixed; inset: 0; z-index: 5; pointer-events: none; opacity: 0; transition: opacity 0.4s;
     background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(255, 255, 255, 0.55) 0deg 0.6deg, transparent 0.6deg 9deg);
     -webkit-mask-image: radial-gradient(ellipse at center, transparent 48%, #000 95%); mask-image: radial-gradient(ellipse at center, transparent 48%, #000 95%); }
+  #volleyOffBtn { display: none; width: 52px; height: 52px; align-self: flex-start; }
+  #volleyOffBtn svg { width: 28px; height: 28px; }
+  body.volleying #volleyOffBtn { display: flex; }
+  body.volleying #toolBtn, body.volleying #toolPanel button { filter: grayscale(1); opacity: 0.45; }
+  body.volleying .seat-bubble:not(.volley-bubble) { display: none; }
+  .hit-bubble { width: 84px; height: 88px; }
+  .hit-bubble .bob { width: 70px; height: 70px; animation-duration: 0.9s; }
+  .hit-bubble svg { width: 64px; height: 64px; }
+  .vol-label, .vol-float { position: absolute; left: 0; top: 0; pointer-events: none; white-space: nowrap; font-weight: bold; }
+  .vol-label { padding: 5px 12px; border-radius: 999px; font-size: 13px; color: #5a4632; background: rgba(255, 250, 238, 0.92); box-shadow: 0 0 0 2px #cf9e6c, 0 3px 8px rgba(70, 40, 15, 0.25); opacity: 0; transition: opacity 0.3s; }
+  .vol-label.show { opacity: 1; }
+  .vol-float { font-size: 20px; color: #fffaf0; text-shadow: 0 2px 0 #8a5a36, 0 0 6px rgba(90, 50, 20, 0.6); }
+  .vol-float.great { font-size: 26px; color: #ffe27a; }
+  .vol-float.weak { color: #ffd0c8; }
+  #volleyBanner { position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); transform: translate(-50%, -12px) scale(0.9); z-index: 25; padding: 8px 22px; border-radius: 999px;
+    font-weight: bold; font-size: 22px; color: #5a3a5a; background: linear-gradient(180deg, #ffe0f0, #c9e8ff); box-shadow: 0 4px 12px rgba(80, 50, 90, 0.3); opacity: 0; pointer-events: none; transition: opacity 0.3s, transform 0.3s; }
+  #volleyBanner.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  #watchTag { top: calc(112px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); font-size: 13px; padding: 5px 12px; display: none; }
+  body.volley-watching #watchTag { display: block; }
   #bananaOffBtn { display: none; width: 52px; height: 52px; align-self: flex-start; }
   #bananaOffBtn svg { width: 28px; height: 28px; }
   body.bananaing #bananaOffBtn { display: flex; }
@@ -367,6 +386,7 @@
   <div id="bagPanel" class="wood-frame"></div>
   <button id="bikeOffBtn" class="round-btn" type="button" title="Get off" aria-label="Get off the bicycle"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8 V30 M15 22 L24 31 L33 22" fill="none" stroke="#fbf0dc" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 39 H36" stroke="#fbf0dc" stroke-width="5" stroke-linecap="round"/></svg></button>
   <div id="speedFx" aria-hidden="true"></div>
+  <button id="volleyOffBtn" class="round-btn" type="button" title="Leave the court" aria-label="Leave the volleyball court"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M30 10 H38 V38 H30" fill="none" stroke="#fbf0dc" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M26 24 H9 M16 16 L8 24 L16 32" fill="none" stroke="#fbf0dc" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   <button id="bananaOffBtn" class="round-btn" type="button" title="Get off" aria-label="Get off the banana boat"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8 V30 M15 22 L24 31 L33 22" fill="none" stroke="#fbf0dc" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 39 H36" stroke="#fbf0dc" stroke-width="5" stroke-linecap="round"/></svg></button>
   <button id="balloonOffBtn" class="round-btn" type="button" title="Get off" aria-label="Get off the balloon"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8 V30 M15 22 L24 31 L33 22" fill="none" stroke="#fbf0dc" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 39 H36" stroke="#fbf0dc" stroke-width="5" stroke-linecap="round"/></svg></button>
   <div class="row">
@@ -402,6 +422,8 @@
   <div id="bikeSwatches"></div>
   <button type="button" id="bikeCancel">Cancel</button>
 </div>
+<div id="volleyBanner" aria-live="polite"></div>
+<div id="watchTag" class="hud pill">👀 Watching</div>
 <div id="fireBanner" aria-live="polite">🔥 Fire show starting!</div>
 <button id="logout" type="button">Log out</button>
 <button id="backBtn" class="round-btn" type="button" title="Leave the house" aria-label="Leave the house"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M29 11 L16 24 L29 37" fill="none" stroke="#fbf0dc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>

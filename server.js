@@ -224,6 +224,21 @@ setInterval(() => {
   }
   if (changed) broadcast(bananaMsg());
 }, 200);
+// ---- beach volleyball: the match engine from island.js runs here (ball flights, rules, the practice bot, hit checks);
+// clients only send join / practice / again / leave / hit and draw what this sends. Never saved.
+const { volleyEngine, VOLLEY } = require('./island.js');
+const playerById = (id) => { for (const q of players.values()) if (q.id === id) return q; return null; };
+let volleyDirty = false;
+const volley = volleyEngine({ now: () => Date.now(), emit: () => { volleyDirty = true; }, posOf: (id) => { const q = playerById(id); return q && Number.isFinite(q.x) && !q.room ? { x: q.x, z: q.z } : null; } });
+const volleyMsg = () => ({ t: 'volley', now: Date.now(), ...volley.view() });
+const nearCourt = (p) => Number.isFinite(p.x) && !p.room && Math.abs(p.x - VOLLEY.x) < VOLLEY.hw + 6 && Math.abs(p.z - VOLLEY.z) < VOLLEY.hl + 6;
+let volleyBotT = 0;
+setInterval(() => {
+  volley.tick();
+  const now = Date.now(); // the bot's position goes out ten times a second while it plays
+  if (volley.S.bot && now - volleyBotT > 100) { volleyBotT = now; volleyDirty = true; }
+  if (volleyDirty) { volleyDirty = false; broadcast(volleyMsg()); }
+}, 50);
 const DOLPHIN_SEED = Math.floor(Math.random() * 1e9); // the dolphins' shared jump schedule
 const wheelAngle = (t) => ((t % RIDES.ferris.periodMs) / RIDES.ferris.periodMs) * Math.PI * 2;
 // boards p onto a ride; returns '' when it worked, or the reason it didn't
@@ -502,7 +517,7 @@ wss.on('connection', (ws) => {
       gardens: gardenList(),
       islandWatered, islandHarvested,
       garden: { growMs: GARDEN_GROW_MS, wetMs: GARDEN_WET_MS },
-      seats: [...seats.entries()], swing, rides: ridesMsg(), bikes: [...bikes.values()].map(bikePub), balloon: balloonMsg(), banana: bananaMsg(), dolphinSeed: DOLPHIN_SEED,
+      seats: [...seats.entries()], swing, rides: ridesMsg(), bikes: [...bikes.values()].map(bikePub), balloon: balloonMsg(), banana: bananaMsg(), volley: volleyMsg(), dolphinSeed: DOLPHIN_SEED,
       bo: boMsg(), sellPrices: SELL_PRICES,
     });
     if (newHouse) broadcast({ t: 'house', plot: acc.plot, name: acc.name, roof: acc.roof }, ws);
@@ -636,7 +651,7 @@ wss.on('connection', (ws) => {
       send(ws, { t: 'bikeResult', ok: true, why: 'returned' });
     } else if (msg.t === 'bikeMount') { // only your own bicycle, only when you're standing by it
       const b = bikes.get(p.id);
-      if (!b || b.riding || p.room || balloonSpot(p.id) >= 0 || !Number.isFinite(p.x) || Math.hypot(p.x - b.x, p.z - b.z) > 3.5) return send(ws, { t: 'bikeResult', ok: false, why: 'mount' });
+      if (!b || b.riding || p.room || balloonSpot(p.id) >= 0 || volley.sideOf(p.id) >= 0 || !Number.isFinite(p.x) || Math.hypot(p.x - b.x, p.z - b.z) > 3.5) return send(ws, { t: 'bikeResult', ok: false, why: 'mount' });
       if ([...seats.values()].includes(p.id)) { setSeat(p, null); broadcast(seatsMsg()); }
       if (leaveRides(p)) broadcast(ridesMsg());
       b.riding = true; b.at = Date.now();
@@ -656,7 +671,7 @@ wss.on('connection', (ws) => {
       broadcast({ t: 'bike', bike: bikePub(b) });
     } else if (msg.t === 'bananaBoard') { // a free seat on a waiting banana boat, from the jetty
       const bi = msg.boat, si = msg.seat, b = bananas[bi], bk = bikes.get(p.id);
-      if (!Number.isInteger(bi) || !b || !Number.isInteger(si) || si < 0 || si > 5 || bananaSeatOf(p.id)) return;
+      if (!Number.isInteger(bi) || !b || !Number.isInteger(si) || si < 0 || si > 5 || bananaSeatOf(p.id) || volley.sideOf(p.id) >= 0) return;
       const why = b.s !== 'wait' ? 'away' : b.riders[si] !== null ? 'taken' : !nearJetty(p) ? 'far' : balloonSpot(p.id) >= 0 ? 'balloon' : bk && bk.riding ? 'bike' : null;
       if (why) return send(ws, { t: 'bananaResult', ok: false, why });
       if ([...seats.values()].includes(p.id)) { setSeat(p, null); broadcast(seatsMsg()); }
@@ -677,7 +692,7 @@ wss.on('connection', (ws) => {
       if (balloonSpot(p.id) >= 0) return;
       const b = bikes.get(p.id), near = Number.isFinite(p.x) && !p.room && Math.hypot(p.x - BALLOON.pad.x, p.z - BALLOON.pad.z) <= BALLOON.reach;
       const free = balloon.riders.indexOf(null);
-      const why = balloon.s !== 'tied' ? 'flying' : free < 0 ? 'full' : !near ? 'far' : b && b.riding ? 'bike' : bananaSeatOf(p.id) ? 'banana' : null;
+      const why = balloon.s !== 'tied' ? 'flying' : free < 0 ? 'full' : !near ? 'far' : b && b.riding ? 'bike' : bananaSeatOf(p.id) ? 'banana' : volley.sideOf(p.id) >= 0 ? 'volley' : null;
       if (why) return send(ws, { t: 'balloonResult', ok: false, why });
       if ([...seats.values()].includes(p.id)) { setSeat(p, null); broadcast(seatsMsg()); }
       if (leaveRides(p)) broadcast(ridesMsg());
@@ -698,7 +713,18 @@ wss.on('connection', (ws) => {
       // the merry-go-round lets you off any time; the Ferris wheel only at the end of its turn
       for (const [k, o] of rideOcc.carousel) if (o.id === p.id) rideOcc.carousel.delete(k);
       broadcast(ridesMsg());
+    } else if (msg.t === 'volleyJoin') { // a free side of the court, from the sand beside it
+      const bk = bikes.get(p.id);
+      const why = !nearCourt(p) ? 'far' : [...seats.values()].includes(p.id) ? 'seat' : bk && bk.riding ? 'bike' : balloonSpot(p.id) >= 0 ? 'balloon' : bananaSeatOf(p.id) ? 'banana' : volley.join(p.id, msg.side, p.name);
+      if (why) send(ws, { t: 'volleyResult', why });
+    } else if (msg.t === 'volleyPractice') { if (volley.practice(p.id)) send(ws, { t: 'volleyResult', why: 'practice' });
+    } else if (msg.t === 'volleyAgain') { if (volley.again(p.id)) send(ws, { t: 'volleyResult', why: 'again' });
+    } else if (msg.t === 'volleyLeave') { volley.leave(p.id);
+    } else if (msg.t === 'volleyHit') {
+      const why = volley.hit(p.id, Number(msg.at), Number(msg.tx), Number(msg.tz));
+      if (why) send(ws, { t: 'volleyResult', why });
     } else if (msg.t === 'sit') {
+      if (volley.sideOf(p.id) >= 0) return; // playing volleyball
       if (p.room) return; // the island's benches, not from inside a house
       if (leaveRides(p)) broadcast(ridesMsg());
       const seat = msg.seat;
@@ -832,6 +858,7 @@ wss.on('connection', (ws) => {
     if (leaveRides(p)) broadcast(ridesMsg()); // a rider who disconnects frees the seat
     dropBike(p, 'fade'); // their bicycle fades away
     if (balloonLeave(p.id)) broadcast(balloonMsg()); // and their spot in the balloon is free
+    volley.leave(p.id); // their side of the volleyball court is free (a match in play goes to the other player)
     { const at = bananaSeatOf(p.id); if (at) { bananas[at.boat].riders[at.seat] = null; if (bananas[at.boat].s === 'wait' && !bananas[at.boat].riders.some((r) => r !== null)) bananas[at.boat].first = 0; broadcast(bananaMsg()); } }
     broadcast({ t: 'leave', id: p.id });
     broadcast({ t: 'count', n: players.size });

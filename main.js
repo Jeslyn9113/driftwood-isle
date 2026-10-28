@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createIsland, PALETTE, LAYOUT, loopPolyline, plotVisit, buildBoRoute, routeAt, riverPolyline, makePath, pathAt, bananaCourse, bananaRideAt, bananaRetAt, bananaReturnCtrl } from './island.js';
+import { createIsland, PALETTE, LAYOUT, loopPolyline, plotVisit, buildBoRoute, routeAt, riverPolyline, makePath, pathAt, bananaCourse, bananaRideAt, bananaRetAt, bananaReturnCtrl, VOLLEY, volleyEngine, volleyBallAt, volleyStart, volleyClamp, volleyHalfOf, volleyMatchPoint } from './island.js';
 
 // ---------------------------------------------------------------- helpers
 function mulberry32(a) {
@@ -1479,7 +1479,7 @@ function navBuild() {
     if (!firm(x, z) || !firm(x - e, z - e) || !firm(x + e, z - e) || !firm(x - e, z + e) || !firm(x + e, z + e)) grid[j * w + i] = 1;
   }
   for (const c of colliders) { // anything solid, with a little room for the character
-    if (c.lvl === 'd' || c.lvl === 'w') continue; // up on a balcony, or out in the water: not the walking ground
+    if (c.lvl === 'd' || c.lvl === 'w' || c.nonav) continue; // up on a balcony, out in the water, or the volleyball net (solid, but left out of planned paths so they stay as they were)
     const r = c.r + 0.28, i0 = Math.floor((c.x - r - NAV.x0) / cell), i1 = Math.floor((c.x + r - NAV.x0) / cell);
     const j0 = Math.floor((c.z - r - NAV.z0) / cell), j1 = Math.floor((c.z + r - NAV.z0) / cell);
     for (let j = Math.max(0, j0); j <= Math.min(h - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(w - 1, i1); i++) {
@@ -2248,14 +2248,12 @@ const festival = (() => {
     for (const x of [-1.9, 1.9]) { g.add(mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.8, 6), M.woodDark, x, 1.4, -1.45)); g.add(mesh(new THREE.SphereGeometry(0.12, 8, 6), M.lantern, x, 2.85, -1.45)); g.updateMatrixWorld(true); const w = g.localToWorld(new THREE.Vector3(x, 2.85, -1.45)); glowSprite(w.x, w.y, w.z, 1.5); }
     colliders.push({ x: p.x, z: p.z, r: 1.9 }); avoid.push({ x: p.x, z: p.z, r: 3.2 });
   }
-  // beach props: a volleyball net, surfboards standing in the sand, two more parasols
+  // beach props: surfboards standing in the sand, two more parasols. The volleyball net that stood here is now the
+  // playable court a little to the south (built after the scenery, see the volleyball section); these placeholders keep
+  // the scenery laid out exactly as before and are taken away again once it's placed.
   {
-    const v = F.volley, g = new THREE.Group(); g.position.set(v.x, H(v.x, v.z), v.z); scene.add(g);
-    for (const x of [-2.6, 2.6]) g.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.4, 6), M.white, x, 1.2, 0));
-    const net = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 0.8, 16, 3), new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.8 })); net.position.y = 2.0; g.add(net);
-    g.add(mesh(new THREE.BoxGeometry(5.2, 0.06, 0.03), M.white, 0, 2.4, 0));
-    const ball = mesh(new THREE.SphereGeometry(0.17, 10, 8), mat('#fff27a'), 1.2, 0.17, 1.4); g.add(ball);
-    for (const x of [-2.6, 2.6]) colliders.push({ x: v.x + x, z: v.z, r: 0.12 });
+    const v = F.volley;
+    for (const x of [-2.6, 2.6]) colliders.push({ x: v.x + x, z: v.z, r: 0.12, oldNet: true });
     avoid.push({ x: v.x, z: v.z, r: 4 });
   }
   F.surf.forEach(([x, z], i) => {
@@ -3245,6 +3243,7 @@ function selectTool(kind) {
   if (bikeRide) { toast("Tools can't be used while riding"); return; }
   if (myBalloonSpot() !== null) { toast("Tools can't be used in the balloon"); return; }
   if (myBananaSeat() || isSwimming()) { toast("Tools can't be used in the water"); return; }
+  if (volMine() !== null) { toast("Tools can't be used while playing volleyball"); return; }
   if (kind === 'house' && currentTool !== 'house' && !(roomInfo && roomInfo.own)) { toast('The House Tool works inside your own house'); return; }
   const was = currentTool;
   currentTool = currentTool === kind ? null : kind;
@@ -3593,6 +3592,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (bikeRide) { if (dlg.npc) endTalk(); bikeTap(); return; } // riding: tap the ground to ride there
   if (myBalloonSpot() !== null) return; // in the balloon: the floating buttons do everything
   if (myBananaSeat()) return; // on the banana boat: hold on!
+  if (volMine() !== null) { if (dlg.npc) endTalk(); volleyTap(); return; } // on the volleyball court: move on your half, aim at theirs
   if (isSwimming()) { if (dlg.npc) endTalk(); swimTap(); return; } // swimming: just swim where you tap
   if (myRide) { // tapping the ground: off the merry-go-round (the Ferris wheel finishes its turn first)
     if (myRide.kind === 'carousel') net.send({ t: 'rideOff' }); else toast('Enjoy the view! You step off after one full turn');
@@ -3901,7 +3901,7 @@ function updatePlayer(dt, time) {
     } else {
       moving = true;
       const swimSlow = swimming(player.position.x, player.position.z), inWater = wading(player.position.x, player.position.z) || swimSlow;
-      walk.speed = Math.min(swimSlow ? 1.5 : inWater ? 1.6 : 3.2, walk.speed + dt * 10); // slower through the water
+      walk.speed = Math.min(swimSlow ? 1.5 : inWater ? 1.6 : volMine() !== null ? 5 : 3.2, walk.speed + dt * (volMine() !== null ? 16 : 10)); // slower through the water
       if (inWater) { walk.rippleT = (walk.rippleT || 0) - dt; if (walk.rippleT <= 0) { walk.rippleT = 0.32; ripple(player.position.x, player.position.z, 0.35); } }
       const step = Math.min(wp ? sd : dist - stopAt * 0.5, walk.speed * dt);
       const nx = player.position.x + (sx / sd) * step, nz = player.position.z + (sz / sd) * step;
@@ -7505,6 +7505,301 @@ const dolphins = (() => {
     dgeo.attributes.position.needsUpdate = true; dgeo.attributes.color.needsUpdate = true;
   };
 })();
+// ---------------------------------------------------------------- beach volleyball
+// The court (island.js VOLLEY): net along x, side 0 "Left" on the smaller-z half, side 1 "Right" on the other. The
+// server runs the match (ball flights, rules, the practice bot, hit checks); here we draw it, place the buttons and
+// send taps. On the solo island the same engine runs right here.
+const VOL = VOLLEY, VSIDE = ['Left', 'Right'];
+for (const c of colliders) if (c.oldNet) { c.x = c.z = 1e4; c.r = 0; } // the old net's spot is open sand now (kept in place in the list: others index it)
+const volCourt = (() => {
+  const g = new THREE.Group(); g.position.set(VOL.x, 0, VOL.z); scene.add(g);
+  const gy = (lx, lz) => H(VOL.x + lx, VOL.z + lz);
+  // boundary ropes pegged into the sand, and a line under the net
+  const rope = mat('#fff4dc'), peg = M.woodDark, W = VOL.hw, L = VOL.hl;
+  const line = (x0, z0, x1, z1) => { const len = Math.hypot(x1 - x0, z1 - z0), m = mesh(new THREE.BoxGeometry(0.07, 0.035, len), rope, (x0 + x1) / 2, gy((x0 + x1) / 2, (z0 + z1) / 2) + 0.03, (z0 + z1) / 2); m.rotation.y = Math.atan2(x1 - x0, z1 - z0); m.castShadow = false; g.add(m); };
+  line(-W, -L, W, -L); line(-W, L, W, L); line(-W, -L, -W, L); line(W, -L, W, L); line(-W, 0, W, 0);
+  for (const [x, z] of [[-W, -L], [W, -L], [-W, L], [W, L], [-W, 0], [W, 0]]) g.add(mesh(new THREE.ConeGeometry(0.06, 0.16, 5), peg, x, gy(x, z) + 0.06, z));
+  // the posts and a taut net with a white band on top
+  const PX = W + 0.35, top = VOL.net;
+  for (const s of [-1, 1]) {
+    g.add(mesh(new THREE.CylinderGeometry(0.075, 0.09, top + 0.35, 8), mat('#f29ab8'), s * PX, gy(s * PX, 0) + (top + 0.35) / 2, 0));
+    g.add(mesh(new THREE.SphereGeometry(0.11, 10, 8), mat('#f6d55c'), s * PX, gy(s * PX, 0) + top + 0.38, 0));
+    const guy = mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.4, 3), rope, s * (PX + 0.4), gy(s * PX, 0) + top / 2, 0); guy.rotation.z = s * 0.55; g.add(guy);
+  }
+  const netMat = new THREE.MeshBasicMaterial({ color: 0xfff8ea, wireframe: true, transparent: true, opacity: 0.85 });
+  const net = new THREE.Mesh(new THREE.PlaneGeometry(PX * 2, 0.85, 22, 4), netMat); net.position.set(0, gy(0, 0) + top - 0.43, 0); g.add(net);
+  g.add(mesh(new THREE.BoxGeometry(PX * 2, 0.08, 0.04), M.white, 0, gy(0, 0) + top, 0));
+  g.add(mesh(new THREE.BoxGeometry(PX * 2, 0.03, 0.03), M.white, 0, gy(0, 0) + top - 0.86, 0));
+  // you walk round the court, not through the net or its posts
+  for (let x = -PX; x <= PX + 0.01; x += 0.45) colliders.push({ x: VOL.x + x, z: VOL.z, r: 0.22, nonav: true });
+  // two little score signs on posts, one at each side's corner, and the big board over the net
+  const signTex = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return { c, t }; };
+  const signs = [0, 1].map((side) => {
+    const s = side ? 1 : -1, x = -(W + 0.9), z = s * (L - 0.6), st = new THREE.Group(); st.position.set(x, gy(x, z), z); g.add(st);
+    st.add(mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.5, 6), M.wood, 0, 0.75, 0));
+    st.add(mesh(new THREE.BoxGeometry(0.72, 0.6, 0.06), mat(side ? '#8fc0f0' : '#f29ab8'), 0, 1.55, 0));
+    const tx = signTex(128, 96), face = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.48), new THREE.MeshBasicMaterial({ map: tx.t, transparent: true }));
+    face.position.set(0, 1.55, 0.035); face.rotation.y = Math.PI / 2; st.rotation.y = -Math.PI / 2; st.add(face);
+    const back = face.clone(); back.position.z = -0.035; back.rotation.y = -Math.PI / 2 + Math.PI; st.add(back);
+    colliders.push({ x: VOL.x + x, z: VOL.z + z, r: 0.2, nonav: true });
+    return tx;
+  });
+  const board = signTex(512, 200), boardSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: board.t, transparent: true, depthWrite: false }));
+  boardSpr.scale.set(3.4, 1.33, 1); boardSpr.position.set(0, gy(0, 0) + top + 1.35, 0); g.add(boardSpr);
+  return { g, signs, board, boardSpr };
+})();
+// a round beach ball in pastel panels, and its little shadow
+const volBall = (() => {
+  const geo = new THREE.SphereGeometry(VOL.r, 16, 12), cols = ['#f29ab8', '#fffaf0', '#8fd0f0', '#fffaf0', '#f6d55c', '#fffaf0'].map((c) => new THREE.Color(c)), pos = geo.attributes.position, col = [];
+  for (let i = 0; i < pos.count; i++) { const a = Math.atan2(pos.getZ(i), pos.getX(i)), k = Math.floor(((a + Math.PI) / TAU) * 6) % 6, c = Math.abs(pos.getY(i)) > VOL.r * 0.88 ? new THREE.Color('#fffaf0') : cols[k]; col.push(c.r, c.g, c.b); }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const m = mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, flatShading: true })); scene.add(m);
+  const sh = new THREE.Mesh(new THREE.CircleGeometry(VOL.r * 1.1, 12), new THREE.MeshBasicMaterial({ color: 0x5a4632, transparent: true, opacity: 0.28, depthWrite: false })); sh.rotation.x = -Math.PI / 2; scene.add(sh);
+  return { m, sh };
+})();
+// Bonbon, the practice bot: a little round sweetie with a visor (only out on the court while someone practises)
+const volBot = (() => {
+  const n = makeTownNpc({ name: 'Bonbon (bot)', tag: '#9be0c0', skin: '#ffe0f0', hair: '#9be0c0', top: '#fffaf0', bottom: '#9be0c0', shoes: '#f29ab8' });
+  n.head.add(mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.05, 14, 1, false, -1.2, 2.4), n.soft('#f6d55c'), 0, 0.12, 0.05));
+  const ant = mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.25, 4), n.soft('#8a5a36'), 0, 0.42, 0); n.head.add(ant);
+  n.head.add(mesh(new THREE.SphereGeometry(0.06, 8, 6), n.soft('#f29ab8'), 0, 0.56, 0));
+  const smile = mesh(new THREE.TorusGeometry(0.07, 0.016, 4, 10, Math.PI), n.soft('#b0503a'), 0, -0.1, 0.31); smile.rotation.z = Math.PI; n.head.add(smile);
+  n.g.visible = false; scene.add(n.g);
+  return n;
+})();
+// ---- state (the server's, or the local engine's on the solo island)
+let volState = { st: 'idle', sides: [null, null], names: ['', ''], score: [0, 0], serve: 0, ball: { segs: [], rest: [VOL.x, VOL.r, VOL.z - 1.2] }, land: null, last: -1, hit: null, until: 0, winner: -1, bot: null, join: [null, null], seq: -1 };
+let volLocal = null;
+const volMine = () => { const i = volState.sides.indexOf(net.id); return i >= 0 ? i : null; };
+const volLive = () => ['count', 'serve', 'rally', 'point'].includes(volState.st);
+let volWas = null, volLastHitAt = 0, volLastSt = '', volLanded = 0, volAim = null, volAnim = new Map(), volOverShown = 0, volCountShown = -1;
+function volleySend(m) {
+  if (net.online) { net.send(m); return; }
+  if (!volLocal) volLocal = volleyEngine({ now: nowMs, emit: () => { volState = JSON.parse(JSON.stringify(volLocal.view())); volChanged(); }, posOf: (id) => (id === net.id ? { x: player.position.x, z: player.position.z } : null) });
+  const why = m.t === 'volleyJoin' ? volLocal.join(net.id, m.side, net.myName || 'You') : m.t === 'volleyPractice' ? volLocal.practice(net.id) : m.t === 'volleyAgain' ? volLocal.again(net.id) : m.t === 'volleyLeave' ? volLocal.leave(net.id) : m.t === 'volleyHit' ? volLocal.hit(net.id, m.at, m.tx, m.tz) : null;
+  if (why) volResult(why);
+}
+function volResult(why) {
+  const msg = { far: 'Walk over to the court first', taken: 'Someone is already playing on that side', busy: "You're already on the court", seat: 'Stand up first', bike: 'Park the bicycle first', balloon: 'Get out of the balloon first', banana: 'Hop off the banana boat first', reach: 'Too far from the ball!', turn: 'Not your touch yet', late: 'Too late!' }[why];
+  if (msg) toast(msg);
+}
+function applyVolley(m) { const { t, now, ...rest } = m; volState = rest; volChanged(); }
+// someone joined, left, scored, hit...: buttons, walking back to your side, the camera, banners
+function volChanged() {
+  const mine = volMine();
+  if (mine !== volWas) {
+    document.body.classList.toggle('volleying', mine !== null); toolSlot.visible = mine === null;
+    if (mine !== null) {
+      if (mySeat !== null) standUp(); if (fishing) endFishing(); if (dlg.npc) endTalk();
+      const st = volleyStart(mine); walk.item = null; walk.tree = null; walk.cast = null; walk.bug = null; walk.water = null; walk.seat = null; walk.route = null; walk.deck = null;
+      walk.target = new THREE.Vector3(st.x, 0, st.z); volAim = null;
+      toast(`You're on the ${VSIDE[mine].toLowerCase()} side. Tap your half to move, the other half to aim`);
+    } else if (volWas !== null) toast('You left the court');
+    volWas = mine;
+  }
+  if (volState.st !== volLastSt) {
+    const prev = volLastSt; volLastSt = volState.st;
+    if (volState.st === 'count' && mine !== null) { // frame the court from behind your side
+      orbit.yaw = mine ? 0 : Math.PI; orbit.pitch = THREE.MathUtils.degToRad(42); orbit.vYaw = orbit.vPitch = 0; setZoomTarget(ZOOM_DEFAULT * 1.15);
+      const st = volleyStart(mine); walk.target = new THREE.Vector3(st.x, 0, st.z);
+    }
+    if ((volState.st === 'over' || (volState.st === 'wait' && prev === 'over')) && mine !== null) { const st = volleyStart(mine); walk.target = new THREE.Vector3(st.x, 0, st.z); }
+  }
+  if (volState.hit && volState.hit.at !== volLastHitAt) { // a hit: that side's player jumps, and a word for a great one
+    volLastHitAt = volState.hit.at;
+    const h = volState.hit, b = volleyBallAt(volState.ball, h.at);
+    volAnim.set(h.side, { t0: performance.now(), kind: h.q === 'great' && b[1] > 1.4 ? 'spike' : b[1] < 0.9 ? 'dive' : 'bump' });
+    volFloat(b, h.q === 'great' ? 'Great!' : h.q === 'weak' ? 'Oops!' : 'Nice!', h.q);
+    if (b[1] < 0.9) sandPuff(b[0], b[2]);
+  }
+}
+// ---- little effects: floating words, sand puffs, confetti
+const volFloats = [];
+function volFloat(at, text, q) {
+  const el = document.createElement('div'); el.className = 'vol-float' + (q === 'great' ? ' great' : q === 'weak' ? ' weak' : ''); el.textContent = text; seatLayer.appendChild(el);
+  volFloats.push({ el, at: new THREE.Vector3(at[0], at[1] + 0.6, at[2]), t: 0 });
+}
+const sandPuffGeo = new THREE.SphereGeometry(0.09, 6, 4), sandPuffMat = new THREE.MeshBasicMaterial({ color: 0xf0dcae, transparent: true, opacity: 0.8, depthWrite: false });
+function sandPuff(x, z) {
+  const y = groundY(x, z) + 0.05, bits = [];
+  for (let k = 0; k < 9; k++) { const m = new THREE.Mesh(sandPuffGeo, sandPuffMat.clone()); m.position.set(x, y, z); const a = (k / 9) * TAU; bits.push({ m, vx: Math.cos(a) * (0.8 + Math.random()), vz: Math.sin(a) * (0.8 + Math.random()), vy: 1.2 + Math.random() }); scene.add(m); }
+  let t = 0;
+  transients.push((dt) => {
+    t += dt;
+    for (const b of bits) { b.vy -= 6 * dt; b.m.position.x += b.vx * dt; b.m.position.z += b.vz * dt; b.m.position.y = Math.max(y, b.m.position.y + b.vy * dt); b.m.scale.setScalar(1 + t * 2); b.m.material.opacity = Math.max(0, 0.8 - t * 1.3); }
+    if (t > 0.65) { for (const b of bits) { scene.remove(b.m); b.m.material.dispose(); } return false; }
+    return true;
+  });
+}
+const confetti = (() => {
+  const N = 220, pos = new Float32Array(N * 3), vel = new Float32Array(N * 3), col = new Float32Array(N * 3), life = new Float32Array(N);
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.14, vertexColors: true, transparent: true, depthWrite: false })); pts.frustumCulled = false; scene.add(pts);
+  const pal = ['#f29ab8', '#8fd0f0', '#f6d55c', '#9be0c0', '#c9a6ff', '#ffb37a'].map((c) => new THREE.Color(c));
+  for (let i = 0; i < N; i++) pos[i * 3 + 1] = -50;
+  return {
+    burst(x, y, z) { for (let i = 0; i < N; i++) { pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z; const a = Math.random() * TAU, s = 1 + Math.random() * 2.5; vel[i * 3] = Math.cos(a) * s; vel[i * 3 + 1] = 3 + Math.random() * 4; vel[i * 3 + 2] = Math.sin(a) * s; const c = pal[i % pal.length]; col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; life[i] = 2.5 + Math.random(); } geo.attributes.color.needsUpdate = true; },
+    update(dt) { let any = false; for (let i = 0; i < N; i++) { if (life[i] <= 0) continue; any = true; life[i] -= dt; vel[i * 3 + 1] -= 5 * dt; vel[i * 3] *= 1 - dt * 1.5; vel[i * 3 + 2] *= 1 - dt * 1.5; pos[i * 3] += vel[i * 3] * dt; pos[i * 3 + 1] = Math.max(0.05, pos[i * 3 + 1] + vel[i * 3 + 1] * dt); pos[i * 3 + 2] += vel[i * 3 + 2] * dt; if (life[i] <= 0) pos[i * 3 + 1] = -50; } if (any) geo.attributes.position.needsUpdate = true; },
+  };
+})();
+// ---- the floating circles: Play at each side, Practice, Play again, Hit!; and the "Waiting for a player" bubble
+const PLAY_ICON = '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="14" fill="#fffaf0" stroke="#8a5a36" stroke-width="2.4"/><path d="M12 19 C20 22 28 22 36 18 M14 31 C21 27 29 27 35 31 M24 10 C18 18 18 30 24 38" fill="none" stroke="#f29ab8" stroke-width="2.6"/></svg>';
+const BOT_ICON = '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="26" r="12" fill="#ffe0f0" stroke="#8a5a36" stroke-width="2.2"/><path d="M14 22 Q24 12 34 22" fill="#f6d55c" stroke="#8a5a36" stroke-width="2"/><circle cx="20" cy="27" r="2" fill="#2b211c"/><circle cx="28" cy="27" r="2" fill="#2b211c"/><path d="M24 14 V7" stroke="#8a5a36" stroke-width="2"/><circle cx="24" cy="6" r="2.6" fill="#f29ab8"/></svg>';
+const AGAIN_ICON = '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M35 18 A12 12 0 1 0 36 30" fill="none" stroke="#3f8f6a" stroke-width="4" stroke-linecap="round"/><path d="M36 9 V19 H26" fill="none" stroke="#3f8f6a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const HIT_ICON = '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17" fill="#ffd36a" stroke="#b0583a" stroke-width="2.6"/><text x="24" y="30" text-anchor="middle" font-size="15" font-weight="bold" fill="#7a3a10" font-family="sans-serif">Hit!</text></svg>';
+const volPlayBtns = [0, 1].map((side) => { const b = makeDoorBubble(PLAY_ICON, `Play on the ${VSIDE[side].toLowerCase()} side`, () => volJoinTap(side)); b.btn.classList.add('volley-bubble'); return b; });
+const volPracticeBtn = makeDoorBubble(BOT_ICON, 'Practice against Bonbon the bot', () => volleySend({ t: 'volleyPractice' })); volPracticeBtn.btn.classList.add('volley-bubble');
+const volAgainBtn = makeDoorBubble(AGAIN_ICON, 'Play again', () => volleySend({ t: 'volleyAgain' })); volAgainBtn.btn.classList.add('volley-bubble');
+const volHitBtn = makeDoorBubble(HIT_ICON, 'Hit!', () => volHitTap()); volHitBtn.btn.classList.add('volley-bubble', 'hit-bubble');
+const volWaitEls = [0, 1].map(() => { const el = document.createElement('div'); el.className = 'vol-label'; el.textContent = 'Waiting for a player'; seatLayer.appendChild(el); return el; });
+function volJoinTap(side) {
+  if (volMine() !== null || bikeRide || myBalloonSpot() !== null || myBananaSeat() || myRide) return;
+  if (mySeat !== null) standUp();
+  volleySend({ t: 'volleyJoin', side });
+}
+document.getElementById('volleyOffBtn').addEventListener('click', () => { if (volMine() !== null) { if (volLive() && volState.sides[1 - volMine()] !== 'bot' && volState.sides[1 - volMine()] !== null) toast('You left the match'); volleySend({ t: 'volleyLeave' }); } });
+// can the ball be hit right now (your serve, or the ball coming down within reach on your side)?
+function volCanHit() {
+  const mine = volMine(); if (mine === null) return false;
+  if (volState.st === 'serve') return volState.serve === mine;
+  if (volState.st !== 'rally' || volState.last === mine || !volState.land) return false;
+  const now = nowMs(), b = volleyBallAt(volState.ball, now);
+  return now < volState.land.t - 30 && b[1] > 0.3 && b[1] < 3.4 && (b[2] - VOL.z) * (mine ? 1 : -1) > -0.6 && Math.hypot(b[0] - player.position.x, b[2] - player.position.z) <= VOL.reach;
+}
+function volHitTap() {
+  const mine = volMine(); if (mine === null || !volCanHit()) return;
+  const m = { t: 'volleyHit', at: Math.round(nowMs()) };
+  if (volAim) { m.tx = +volAim.x.toFixed(2); m.tz = +volAim.z.toFixed(2); }
+  volleySend(m);
+}
+// a tap on the sand while you play: your half walks you there (never across the net), the other half sets your aim
+function volleyTap() {
+  const hits = raycaster.intersectObjects([terrain], false); if (!hits.length) return;
+  const p = hits[0].point, mine = volMine();
+  if (volleyHalfOf(p.z) !== mine && Math.abs(p.x - VOL.x) < VOL.hw + 1 && Math.abs(p.z - VOL.z) < VOL.hl + 1) { volAim = { x: p.x, z: p.z }; showMarker(p.x, p.z); return; }
+  const c = volleyClamp(mine, p.x, p.z); walk.target = new THREE.Vector3(c.x, 0, c.z); walk.item = null; walk.tree = null; walk.route = null; showMarker(c.x, c.z);
+}
+// ---- every frame
+const _volV = new THREE.Vector3();
+let volBoardKey = '', volBotSeen = null;
+function volDrawBoard() {
+  const S = volState, now = nowMs(), cd = S.st === 'count' ? Math.max(1, Math.ceil((S.until - now) / 1000)) : 0;
+  const mp = volLive() && S.st !== 'count' && S.winner < 0 ? [0, 1].filter((k) => volleyMatchPoint(S.score, k)) : [];
+  const sub = S.st === 'count' ? `${cd}` : S.st === 'over' ? `${VSIDE[S.winner]} wins!` : mp.length ? 'Match point' : S.st === 'serve' ? `${S.names[S.serve] || VSIDE[S.serve]} to serve` : S.st === 'wait' ? (S.sides[0] && S.sides[1] ? 'Play again?' : 'Waiting for a player') : S.st === 'idle' ? 'Beach volleyball' : '';
+  const key = [S.st, S.score.join(), S.names.join(), sub].join('|');
+  if (key !== volBoardKey) {
+    volBoardKey = key;
+    const c = volCourt.board.c, x = c.getContext('2d');
+    x.clearRect(0, 0, 512, 200);
+    x.fillStyle = 'rgba(255, 250, 238, 0.92)'; if (x.beginPath) { x.beginPath(); if (x.roundRect) x.roundRect(8, 8, 496, 184, 34); else x.rect(8, 8, 496, 184); x.fill(); x.lineWidth = 6; x.strokeStyle = '#cf9e6c'; x.stroke(); }
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.font = 'bold 26px "Trebuchet MS", sans-serif';
+    x.fillStyle = '#d0608a'; x.fillText((S.names[0] || 'Left').slice(0, 12), 110, 48);
+    x.fillStyle = '#4a8fc8'; x.fillText((S.names[1] || 'Right').slice(0, 12), 402, 48);
+    x.font = 'bold 76px "Trebuchet MS", sans-serif'; x.fillStyle = '#5a4632'; x.fillText(`${S.score[0]} : ${S.score[1]}`, 256, 102);
+    x.font = 'bold 28px "Trebuchet MS", sans-serif'; x.fillStyle = mp.length ? '#e0584a' : '#8a5a36'; x.fillText(sub, 256, 160);
+    volCourt.board.t.needsUpdate = true;
+    volCourt.signs.forEach((sg, k) => { const y = sg.c.getContext('2d'); y.clearRect(0, 0, 128, 96); y.fillStyle = '#fffaf0'; y.fillRect(0, 0, 128, 96); y.textAlign = 'center'; y.textBaseline = 'middle'; y.font = 'bold 22px sans-serif'; y.fillStyle = k ? '#4a8fc8' : '#d0608a'; y.fillText(VSIDE[k], 64, 22); y.font = 'bold 50px sans-serif'; y.fillStyle = '#5a4632'; y.fillText(String(S.score[k]), 64, 64); sg.t.needsUpdate = true; });
+  }
+}
+function volCharOf(side) { // the character playing a side (you, another player or the bot)
+  const id = volState.sides[side];
+  if (id === null) return null;
+  if (id === 'bot') return { player: volBot.g, rig: null, npc: volBot };
+  if (id === net.id) return { player, rig };
+  const r = remotes.get(id); return r ? { player: r.player, rig: r.rig } : null;
+}
+function updateVolley(dt, time) {
+  if (volLocal) volLocal.tick();
+  const S = volState, now = nowMs(), mine = volMine();
+  // the ball: held over the server's head, flying, or resting on the sand
+  let bp;
+  if (S.ball && S.ball.held !== undefined && S.st === 'serve') { const c = volCharOf(S.ball.held); bp = c ? [c.player.position.x, c.player.position.y + 2.05 + Math.sin(time * 4) * 0.06, c.player.position.z] : S.ball.rest; }
+  else bp = volleyBallAt(S.ball, now);
+  const gyB = groundY(bp[0], bp[2]);
+  volBall.m.position.set(bp[0], Math.max(gyB + VOL.r, bp[1] + gyB), bp[2]);
+  if (S.st === 'rally' || S.st === 'point') { volBall.m.rotation.x += dt * 6; volBall.m.rotation.z += dt * 3; }
+  volBall.sh.position.set(bp[0], gyB + 0.025, bp[2]); volBall.sh.scale.setScalar(Math.max(0.4, 1.2 - bp[1] * 0.18));
+  if (S.land && S.st !== 'serve' && now >= S.land.t && volLanded !== S.land.t) { volLanded = S.land.t; sandPuff(S.land.x, S.land.z); if (S.st === 'point' || S.st === 'rally') volFloat([S.land.x, 0.3, S.land.z], S.out ? 'Out!' : 'Point!', ''); }
+  // the bot
+  volBot.g.visible = !!S.bot;
+  if (S.bot) {
+    if (!volBotSeen) { volBot.g.position.set(S.bot.x, groundY(S.bot.x, S.bot.z), S.bot.z); volBotSeen = true; }
+    const p = volBot.g.position, dx = S.bot.x - p.x, dz = S.bot.z - p.z;
+    p.x += dx * Math.min(1, dt * 10); p.z += dz * Math.min(1, dt * 10); p.y = groundY(p.x, p.z);
+    const face = Math.hypot(dx, dz) > 0.05 ? Math.atan2(dx, dz) : Math.atan2(bp[0] - p.x, bp[2] - p.z);
+    volBot.g.rotation.y = lerpAngle(volBot.g.rotation.y, face, Math.min(1, dt * 8));
+    const mv = Math.hypot(dx, dz) > 0.03; volBot.legs.forEach((l, k) => { l.rotation.x = mv ? Math.sin(time * 14 + k * Math.PI) * 0.7 : 0; });
+    volBot.armL.rotation.x = volBot.armR.rotation.x = -0.3;
+  } else volBotSeen = null;
+  // your half only, a quicker run, and facing the ball
+  if (mine !== null) {
+    const c = volleyClamp(mine, player.position.x, player.position.z); player.position.x = c.x; player.position.z = c.z;
+    if (walk.target) { const t = volleyClamp(mine, walk.target.x, walk.target.z); walk.target.x = t.x; walk.target.z = t.z; }
+    if (!walk.target && (S.st === 'rally' || S.st === 'serve')) walk.heading = lerpAngle(walk.heading, Math.atan2(bp[0] - player.position.x, bp[2] - player.position.z), Math.min(1, dt * 6));
+  }
+  // jumps, spikes and dives (and the winner's happy hop)
+  for (const side of [0, 1]) {
+    const c = volCharOf(side), a = volAnim.get(side); if (!c) continue;
+    let hop = 0;
+    if (a) {
+      const u = (performance.now() - a.t0) / 1000;
+      if (u > 0.7) volAnim.delete(side);
+      else {
+        const k = Math.sin(Math.min(1, u / 0.6) * Math.PI);
+        const R = c.rig || (c.npc && { armL: c.npc.armL, armR: c.npc.armR, body: c.npc.body });
+        if (a.kind === 'dive') { c.player.rotation.x = 0.9 * k; hop = 0.1 * k; if (R) R.armL.rotation.x = R.armR.rotation.x = -1.6 * k; }
+        else { hop = (a.kind === 'spike' ? 0.75 : 0.45) * k; if (R) { R.armR.rotation.x = -2.9 * k; R.armL.rotation.x = (a.kind === 'spike' ? -1.2 : -2.9) * k; } }
+      }
+    } else if (c.player.rotation.x && !(side === mine && isSwimming())) c.player.rotation.x = 0;
+    if (S.st === 'over' && S.winner === side) hop = Math.abs(Math.sin(time * 6)) * 0.35;
+    c.player.position.y = groundY(c.player.position.x, c.player.position.z) + hop; // on the sand (plus any jump)
+  }
+  // banners: the countdown, "Left wins!", confetti over the winner
+  const close = Math.hypot(player.position.x - VOL.x, player.position.z - VOL.z) < 26 && myRoom === null;
+  if (S.st === 'count' && close) { const n = Math.ceil((S.until - now) / 1000); if (n !== volCountShown) { volCountShown = n; volBanner(n >= 1 && n <= 3 ? `${n}` : 'Go!'); } }
+  else if (S.st === 'serve' && volCountShown > 0) { volCountShown = -1; if (close) volBanner('Go!'); }
+  if (S.st === 'over' && S.winner >= 0 && volOverShown !== S.until) {
+    volOverShown = S.until;
+    if (close) volBanner(`${VSIDE[S.winner]} wins!${S.why === 'left' ? ' (the other player left)' : ''}`, 3500);
+    const c = volCharOf(S.winner), at = c ? c.player.position : new THREE.Vector3(VOL.x, 0, VOL.z);
+    confetti.burst(at.x, at.y + 2.4, at.z);
+  }
+  confetti.update(dt);
+  volDrawBoard();
+  // the floating buttons
+  const freeToJoin = mine === null && myRoom === null && mySeat === null && !bikeRide && myBalloonSpot() === null && !myBananaSeat() && !myRide && !isSwimming();
+  [0, 1].forEach((side) => {
+    const s = side ? 1 : -1, at = _volV.set(VOL.x + (side ? 1.2 : -1.2) * 0, 0, VOL.z + s * (VOL.hl + 0.9)); at.y = groundY(at.x, at.z) + 0.9;
+    const free = S.sides[side] === null || (S.sides[side] === 'bot' && !S.join[side]);
+    placeBubble(volPlayBtns[side], at, freeToJoin && free && Math.hypot(player.position.x - at.x, player.position.z - at.z) < 3.2);
+  });
+  placeBubble(volPracticeBtn, _volV.set(player.position.x + 0.9, player.position.y + 2.3, player.position.z), mine !== null && S.st === 'wait' && S.sides[1 - mine] === null);
+  placeBubble(volAgainBtn, _volV.set(player.position.x - 0.9, player.position.y + 2.3, player.position.z), mine !== null && S.st === 'wait' && S.sides[1 - mine] !== null);
+  const canHit = volCanHit();
+  placeBubble(volHitBtn, _volV.set(player.position.x + 0.7, player.position.y + 1.4, player.position.z), canHit);
+  // "Waiting for a player" over a side that waits for an opponent
+  [0, 1].forEach((side) => {
+    const el = volWaitEls[side], c = volCharOf(side), show = S.st === 'wait' && c && S.sides[1 - side] === null && myRoom === null;
+    if (!show) { el.classList.remove('show'); return; }
+    _volV.set(c.player.position.x, c.player.position.y + 2.7, c.player.position.z).project(camera);
+    if (_volV.z > 1) { el.classList.remove('show'); return; }
+    el.classList.add('show'); el.style.transform = `translate(${((_volV.x * 0.5 + 0.5) * window.innerWidth).toFixed(1)}px, ${((-_volV.y * 0.5 + 0.5) * window.innerHeight).toFixed(1)}px) translate(-50%, -100%)`;
+  });
+  for (let i = volFloats.length - 1; i >= 0; i--) {
+    const f = volFloats[i]; f.t += dt; f.at.y += dt * 0.8;
+    _volV.copy(f.at).project(camera);
+    f.el.style.transform = `translate(${((_volV.x * 0.5 + 0.5) * window.innerWidth).toFixed(1)}px, ${((-_volV.y * 0.5 + 0.5) * window.innerHeight).toFixed(1)}px) translate(-50%, -100%)`;
+    f.el.style.opacity = String(Math.max(0, 1 - f.t / 1.1));
+    if (f.t > 1.1) { if (f.el.parentNode) f.el.parentNode.removeChild(f.el); volFloats.splice(i, 1); }
+  }
+  // watching from the sand
+  const watching = mine === null && volLive() && myRoom === null && Math.hypot(player.position.x - VOL.x, player.position.z - VOL.z) < 13;
+  document.body.classList.toggle('volley-watching', watching);
+}
+const volBannerEl = document.getElementById('volleyBanner');
+let volBannerT = 0;
+function volBanner(text, ms = 900) { if (!volBannerEl) return; volBannerEl.textContent = text; volBannerEl.classList.add('show'); clearTimeout(volBannerT); volBannerT = setTimeout(() => volBannerEl.classList.remove('show'), ms); }
 const PROTOCOL = 9; // must match PROTOCOL in server.js
 const playersEl = document.getElementById('players');
 const net = {
@@ -7621,6 +7916,8 @@ function handleNet(m) {
   if (typeof m.t === 'string' && m.t.startsWith('bike')) { handleBike(m); return; }
   if (m.t === 'balloon') { applyBalloon(m); return; }
   if (m.t === 'banana') { applyBanana(m); return; }
+  if (m.t === 'volley') { applyVolley(m); return; }
+  if (m.t === 'volleyResult') { volResult(m.why); return; }
   if (m.t === 'bananaResult') { toast({ away: 'That boat is out on the water, wait for it to come back', taken: 'Someone just took that seat', far: 'Walk out onto the jetty first', balloon: 'Get out of the balloon first', bike: 'Park the bicycle first' }[m.why] || "You can't get on right now"); return; }
   if (m.t === 'balloonResult') { toast({ flying: 'The balloon is up in the air, wait for it to land', full: 'The basket is full (4 at most)', far: 'Walk up to the balloon first', bike: 'Park the bicycle first' }[m.why] || "You can't board right now"); return; }
   if (m.t === 'auth') {
@@ -7696,6 +7993,7 @@ function handleNet(m) {
     applyBikes(Array.isArray(m.bikes) ? m.bikes : []);
     if (m.balloon) applyBalloon(m.balloon);
     if (m.banana) applyBanana(m.banana);
+    if (m.volley) { volLocal = null; applyVolley(m.volley); }
     if (Number.isFinite(m.dolphinSeed)) dolphinSeed = m.dolphinSeed;
     const treeState = new Map(m.trees || []), bugState = new Map((m.bugs || []).map(([id, gen, at]) => [id, { gen, at }]));
     for (const t of fruitTrees) t.readyAt = treeState.get(t.id) || 0;
@@ -7904,6 +8202,7 @@ function frame(now) {
 
   updateCamera(dt);
   updateParasolFade(dt);
+  updateVolley(dt, elapsed); // after the players and the camera: jumps, the ball, the floating buttons
   updateSeatBubbles(); // after the camera moved, so the circles sit exactly over their seats
   updateDoorBubbles();
   updateBikeBubble();
