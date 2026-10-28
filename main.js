@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createIsland, PALETTE, LAYOUT, loopPolyline, plotVisit, buildBoRoute, routeAt, riverPolyline, makePath, pathAt, bananaCourse, bananaRideAt, bananaRetAt, bananaReturnCtrl, VOLLEY, volleyEngine, volleyBallAt, volleyStart, volleyClamp, volleyHalfOf, volleyMatchPoint, pondR, POND_DOCK, atPond } from './island.js';
+import { createIsland, PALETTE, LAYOUT, loopPolyline, plotVisit, buildBoRoute, routeAt, riverPolyline, makePath, pathAt, bananaCourse, bananaRideAt, bananaRetAt, bananaReturnCtrl, VOLLEY, volleyEngine, volleyBallAt, volleyStart, volleyClamp, volleyHalfOf, volleyMatchPoint, pondR, POND_DOCK, atPond, PIANO, PIANO_DEMO, PIANO_LOW, PIANO_HIGH, pianoAutoNotes, pianoPiecesIn } from './island.js';
 
 // ---------------------------------------------------------------- helpers
 function mulberry32(a) {
@@ -3262,6 +3262,7 @@ function selectTool(kind) {
   if (myBalloonSpot() !== null) { toast("Tools can't be used in the balloon"); return; }
   if (myBananaSeat() || isSwimming()) { toast("Tools can't be used in the water"); return; }
   if (volMine() !== null) { toast("Tools can't be used while playing volleyball"); return; }
+  if (pianoMe()) { toast("Tools can't be used while playing the piano"); return; }
   if (kind === 'house' && currentTool !== 'house' && !(roomInfo && roomInfo.own)) { toast('The House Tool works inside your own house'); return; }
   const was = currentTool;
   currentTool = currentTool === kind ? null : kind;
@@ -3617,7 +3618,8 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     return;
   }
   if (mySeat !== null) standUp();
-  walk.seat = null; walk.door = null; walk.exitDoor = null; walk.waterSpot = null; walk.balloon = false; walk.route = null;
+  if (pianoMe()) pianoStand(); // tapping the ground: up from the piano bench
+  walk.seat = null; walk.door = null; walk.exitDoor = null; walk.waterSpot = null; walk.balloon = false; walk.route = null; walk.piano = false;
   if (myRoom !== null) { roomTap(); return; }
   walk.talk = null;
   if (boTap()) return; // Bo: open the sell panel (or walk over to him)
@@ -3866,6 +3868,12 @@ function updatePlayer(dt, time) {
   if (bikeRide) { updateBikeRide(dt, time); return; }
   if (myBalloonSpot() !== null) { updateBalloonRider(dt, time); return; }
   if (myBananaSeat()) { updateBananaRider(dt, time); return; }
+  if (pianoMe()) { // at the piano: on the bench, hands on the keys
+    placeAtPiano(player, rig, net.id, dt, time);
+    walk.heading = player.rotation.y; walk.moving = false; walk.speed = 0; walk.target = null;
+    shadowBlob.position.set(player.position.x, groundY(player.position.x, player.position.z) + 0.03, player.position.z);
+    return;
+  }
   if (myRide) { // on a ride: carried along, the camera follows
     placeRiding(player, rig, myRide.kind, myRide.seat, dt, time);
     walk.heading = player.rotation.y; walk.moving = false; walk.speed = 0; walk.target = null;
@@ -3885,7 +3893,7 @@ function updatePlayer(dt, time) {
   }
   if (walk.target) {
     const dx = walk.target.x - player.position.x, dz = walk.target.z - player.position.z, dist = Math.hypot(dx, dz);
-    const stopAt = walk.item ? 0.7 : walk.tree ? walk.tree.reach : walk.bug ? 0.9 : walk.water ? 0.8 : walk.seat || walk.door || walk.exitDoor ? 0.35 : walk.talk ? 0.15 : 0.08;
+    const stopAt = walk.item ? 0.7 : walk.tree ? walk.tree.reach : walk.bug ? 0.9 : walk.water ? 0.8 : walk.seat || walk.piano || walk.door || walk.exitDoor ? 0.35 : walk.talk ? 0.15 : 0.08;
     if (walk.item && !walk.item.active) { walk.item = null; walk.target = null; }
     // stuck against an obstacle (rock, umbrella...): give up the walk, or act from here if close enough
     // round anything in the way (hedges, buildings, trees): follow the planned path's next waypoint
@@ -3896,8 +3904,8 @@ function updatePlayer(dt, time) {
     walk.lastDist = gauge;
     const stuck = walk.stuckT > 0.4;
     if (stuck && (dist > stopAt + 1.5 || wp)) {
-      if (walk.item || walk.tree || walk.cast || walk.bug || walk.water || walk.seat || walk.door) toast("Can't reach it from here, try another way");
-      walk.seat = null; walk.door = null; walk.exitDoor = null; walk.talk = null; walk.route = null;
+      if (walk.item || walk.tree || walk.cast || walk.bug || walk.water || walk.seat || walk.piano || walk.door) toast("Can't reach it from here, try another way");
+      walk.piano = false; walk.seat = null; walk.door = null; walk.exitDoor = null; walk.talk = null; walk.route = null;
       walk.target = null; walk.item = null; walk.tree = null; walk.cast = null; walk.bug = null; walk.water = null; walk.stuckT = 0; walk.lastDist = undefined; }
     else if ((dist <= stopAt || (stuck && !wp)) && walk.route && walk.route.length) { // next leg: up or down the stairs, over a bridge
       const n = walk.route.shift(); walk.target.set(n.x, 0, n.z); walk.stuckT = 0; walk.lastDist = undefined;
@@ -3906,8 +3914,9 @@ function updatePlayer(dt, time) {
       walk.stuckT = 0; walk.lastDist = undefined;
       if (walk.item) collect(walk.item);
       if (walk.tree) startSwing(walk.tree);
-      const { cast, bug, water, seat, door, exitDoor, waterSpot, talk, ride } = walk;
-      walk.ride = null;
+      const { cast, bug, water, seat, door, exitDoor, waterSpot, talk, ride } = walk, pianoGo = walk.piano;
+      walk.ride = null; walk.piano = false;
+      if (pianoGo) pianoRequest(); // reached the piano bench: sit down and play
       if (ride && rideReach(ride, player.position)) boardRide(ride);
       walk.talk = null;
       if (talk) { walk.heading = Math.atan2(talk.g.position.x - player.position.x, talk.g.position.z - player.position.z); startTalk(talk); }
@@ -5611,6 +5620,7 @@ function rideTap() {
   return true;
 }
 function boardRide(kind) {
+  if (pianoBlocked()) return;
   if (!net.online) { toast('The rides run when you play online'); return; }
   if (mySeat !== null) standUp();
   let seat;
@@ -6563,6 +6573,7 @@ function bikeWhere(x, z) {
 }
 // the server, or a stand-in for it on the solo island
 function bikeSend(m) {
+  if (/Borrow|Mount/.test(m.t) && pianoBlocked()) return;
   if (net.online) { net.send(m); return; }
   const id = net.id, b = myBike();
   if (m.t === 'bikeBorrow') {
@@ -6930,7 +6941,7 @@ function balloonLocal(m) {
   else if (m.t === 'balloonOff') { if (i < 0) return; if (st.s === 'tied') st.riders[i] = null; else { if (!st.off.includes(id)) st.off.push(id); } }
   applyBalloon({ ...st, riders: st.riders.slice(), off: st.off.slice() });
 }
-function balloonSend(m) { if (net.online) net.send(m); else balloonLocal(m); }
+function balloonSend(m) { if (m.t === 'balloonBoard' && pianoBlocked()) return; if (net.online) net.send(m); else balloonLocal(m); }
 function balloonLocalTick() { // the solo island's version of the server's tick
   const st = balloonState, h = balloonHeight(), aboard = st.riders.filter((r) => r !== null);
   let s = null;
@@ -7307,6 +7318,7 @@ function bananaChanged() {
 }
 // the solo island plays the server's part
 function bananaSend(m) {
+  if (m.t === 'bananaBoard' && pianoBlocked()) return;
   if (net.online) { net.send(m); return; }
   const now = nowMs(), mine = myBananaSeat();
   if (m.t === 'bananaBoard') { const st = bananaState.boats[m.boat]; if (!st || st.s !== 'wait' || st.riders[m.seat] !== null || mine) return; st.riders[m.seat] = net.id; if (!st.first) st.first = now; }
@@ -7599,6 +7611,7 @@ const volMine = () => { const i = volState.sides.indexOf(net.id); return i >= 0 
 const volLive = () => ['count', 'serve', 'rally', 'point'].includes(volState.st);
 let volWas = null, volLastHitAt = 0, volLastSt = '', volLanded = 0, volAim = null, volAnim = new Map(), volOverShown = 0, volCountShown = -1;
 function volleySend(m) {
+  if (m.t === 'volleyJoin' && pianoBlocked()) return;
   if (net.online) { net.send(m); return; }
   if (!volLocal) volLocal = volleyEngine({ now: nowMs, emit: () => { volState = JSON.parse(JSON.stringify(volLocal.view())); volChanged(); }, posOf: (id) => (id === net.id ? { x: player.position.x, z: player.position.z } : null) });
   const why = m.t === 'volleyJoin' ? volLocal.join(net.id, m.side, net.myName || 'You') : m.t === 'volleyPractice' ? volLocal.practice(net.id) : m.t === 'volleyAgain' ? volLocal.again(net.id) : m.t === 'volleyLeave' ? volLocal.leave(net.id) : m.t === 'volleyHit' ? volLocal.hit(net.id, m.at, m.tx, m.tz) : null;
@@ -8028,6 +8041,452 @@ const pond = (() => {
   update.animals = () => [...kois.map((k) => k.g), ...ducks.map((d) => d.g), duckling.g];
   return update;
 })();
+// ---------------------------------------------------------------- game sound and the town piano
+// All sound is made here with the Web Audio API (no audio files). Browsers only allow sound after the first tap, so the
+// audio starts then; the round speaker button mutes or unmutes everything (remembered on this device).
+const sound = (() => {
+  const S = { ctx: null, master: null, piano: null, auto: null, live: null, voices: 0, muted: false };
+  try { S.muted = localStorage.getItem('driftwood.muted') === '1'; } catch { /* private mode: not muted */ }
+  S.start = () => {
+    if (S.ctx) { if (S.ctx.state === 'suspended' && S.ctx.resume) S.ctx.resume().catch(() => {}); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try { S.ctx = new AC(); } catch { S.ctx = null; return; }
+    const c = S.ctx;
+    S.master = c.createGain(); S.master.gain.value = S.muted ? 0 : 1;
+    const comp = c.createDynamicsCompressor(); S.master.connect(comp); comp.connect(c.destination);
+    // a little room around the piano: a short reverb from softly decaying noise
+    const len = Math.floor(c.sampleRate * 2.2), ir = c.createBuffer(2, len, c.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
+    const verb = c.createConvolver(); verb.buffer = ir;
+    const wet = c.createGain(); wet.gain.value = 0.3; verb.connect(wet); wet.connect(S.master);
+    S.piano = c.createGain(); S.piano.gain.value = 0; S.piano.connect(S.master); S.piano.connect(verb); // its loudness: how far away you are
+    S.auto = c.createGain(); S.auto.connect(S.piano); // the piano playing by itself (fades out when someone sits down)
+    S.live = c.createGain(); S.live.connect(S.piano); // a player's notes
+    if (c.state === 'suspended' && c.resume) c.resume().catch(() => {});
+  };
+  for (const ev of ['pointerdown', 'keydown', 'touchend']) window.addEventListener(ev, S.start, true);
+  S.ready = () => !!S.ctx && S.ctx.state === 'running';
+  S.setMuted = (m) => {
+    S.muted = m;
+    try { localStorage.setItem('driftwood.muted', m ? '1' : '0'); } catch { /* not remembered */ }
+    if (S.master) S.master.gain.setTargetAtTime(m ? 0 : 1, S.ctx.currentTime, 0.05);
+  };
+  // one soft piano note: a triangle tone with a quiet octave above, a quick gentle attack, a slow fade while held, a
+  // short release, and a filter that mellows as the note rings
+  S.note = (midi, when, dur, vel, bus) => {
+    const c = S.ctx;
+    if (!c || !bus || S.voices > 30) return;
+    const f = 440 * Math.pow(2, (midi - 69) / 12), t = Math.max(when, c.currentTime), end = t + Math.max(0.12, dur), peak = 0.2 * vel;
+    const o1 = c.createOscillator(), o2 = c.createOscillator(), h = c.createGain(), lp = c.createBiquadFilter(), g = c.createGain();
+    o1.type = 'triangle'; o1.frequency.value = f;
+    o2.type = 'sine'; o2.frequency.value = f * 2; h.gain.value = 0.16;
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(Math.min(8000, f * 7), t); lp.frequency.setTargetAtTime(Math.max(400, f * 2.2), t, 0.6);
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + 0.007);
+    g.gain.setTargetAtTime(peak * 0.3, t + 0.007, 0.45); g.gain.setTargetAtTime(0.0001, end, 0.16);
+    o1.connect(lp); o2.connect(h); h.connect(lp); lp.connect(g); g.connect(bus);
+    o1.start(t); o2.start(t); o1.stop(end + 1); o2.stop(end + 1);
+    S.voices++;
+    o1.onended = () => { S.voices--; try { g.disconnect(); } catch { /* already gone */ } };
+  };
+  return S;
+})();
+{ // the speaker button (top right, under the player count)
+  const btn = document.getElementById('soundBtn');
+  const show = () => { btn.classList.toggle('muted', sound.muted); btn.title = sound.muted ? 'Sound off (tap to turn on)' : 'Sound on (tap to mute)'; btn.setAttribute('aria-pressed', sound.muted ? 'true' : 'false'); };
+  btn.addEventListener('click', () => { sound.start(); sound.setMuted(!sound.muted); show(); });
+  show();
+}
+
+// The piano itself (PIANO in island.js): a pastel grand piano on a round rug, a padded bench, flowers, a lantern and
+// a string of fairy lights. Who sits at it comes from the server ({ who, name, auto0 }); offline it's kept here.
+let pianoS = { who: null, name: '', auto0: 0 };
+const pianoMe = () => pianoS.who !== null && pianoS.who === net.id && myRoom === null;
+const piano = (() => {
+  const g = new THREE.Group(), y0 = H(PIANO.x, PIANO.z);
+  g.position.set(PIANO.x, y0, PIANO.z); g.rotation.y = PIANO.face; scene.add(g);
+  const toWorld = (x, y, z) => new THREE.Vector3(x, y, z).applyAxisAngle(new THREE.Vector3(0, 1, 0), PIANO.face).add(g.position);
+  const hAt = (x, z) => { const w = toWorld(x, 0, z); return H(w.x, w.z) - y0; }; // the lawn's height under a spot, from the piano's base
+  // the rug: soft rings with little hearts, laid over the lawn's gentle bumps
+  const rugTex = canvasTex(256, 256, (c) => {
+    const ring = (r, col) => { c.fillStyle = col; c.beginPath(); c.arc(128, 128, r, 0, TAU); c.fill(); };
+    ring(128, '#e98fae'); ring(118, '#fff1e2'); ring(104, '#f7c3d3'); ring(90, '#fff6ea'); ring(58, '#cfe9de'); ring(46, '#fff6ea');
+    const heart = (x, y, s, col) => { c.fillStyle = col; c.beginPath(); c.moveTo(x, y + s * 0.9); c.bezierCurveTo(x - s * 1.3, y, x - s * 0.6, y - s * 1.1, x, y - s * 0.35); c.bezierCurveTo(x + s * 0.6, y - s * 1.1, x + s * 1.3, y, x, y + s * 0.9); c.fill(); };
+    for (let k = 0; k < 14; k++) { const a = (k / 14) * TAU; heart(128 + Math.cos(a) * 97, 128 + Math.sin(a) * 97, 6, k % 2 ? '#e98fae' : '#9fd3c0'); }
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU + 0.2; c.fillStyle = '#f7c3d3'; c.beginPath(); c.arc(128 + Math.cos(a) * 74, 128 + Math.sin(a) * 74, 5, 0, TAU); c.fill(); }
+    heart(128, 130, 14, '#f7a8c4');
+  });
+  {
+    const geo = new THREE.RingGeometry(0, 2.05, 40, 6), pos = geo.attributes.position;
+    geo.rotateX(-Math.PI / 2);
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); pos.setY(i, hAt(v.x, v.z) + 0.035); }
+    geo.computeVertexNormals();
+    const rug = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: rugTex, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    rug.receiveShadow = true; g.add(rug);
+  }
+  // the body: a rounded grand-piano outline (straight bass side on the left, the curved side on the right), pink outside
+  // and cream inside, on three legs with little gold feet
+  const body = new THREE.Group(); body.position.y = 0.04; g.add(body);
+  const outline = (s) => {
+    const sh = new THREE.Shape();
+    sh.moveTo(-0.7 * s, -0.75 * s); sh.lineTo(0.7 * s, -0.75 * s); sh.lineTo(0.7 * s, -0.15 * s);
+    sh.bezierCurveTo(0.7 * s, 0.35 * s, 0.14 * s, 0.3 * s, 0.12 * s, 0.75 * s);
+    sh.bezierCurveTo(0.1 * s, 1.25 * s, -0.7 * s, 1.35 * s, -0.7 * s, 0.9 * s);
+    sh.lineTo(-0.7 * s, -0.75 * s);
+    return sh;
+  };
+  const slab = (s, depth, bevel) => { const geo = new THREE.ExtrudeGeometry(outline(s), { depth, bevelEnabled: bevel > 0, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 2, curveSegments: 14 }); geo.rotateX(-Math.PI / 2); return geo; };
+  const pink = mat('#f7bfd0', { flatShading: false, roughness: 0.55 }), cream = mat('#fff4e2', { flatShading: false }), gold = mat('#e8c46a', { roughness: 0.4, metalness: 0.3 });
+  const TOP = 0.94;
+  body.add(mesh(slab(1, 0.28, 0.04), pink, 0, TOP - 0.32, 0));
+  body.add(mesh(slab(0.93, 0.02, 0), cream, 0.01, TOP - 0.035, 0.03)); // the inside, seen under the open lid
+  for (const [x, z, w] of [[-0.25, -0.1, 0.9], [-0.05, -0.35, 0.6]]) { const st = mesh(new THREE.BoxGeometry(0.03, 0.015, w), gold, x, TOP - 0.02, z); st.rotation.y = 0.35; body.add(st); } // strings frame
+  const lid = new THREE.Group(); lid.position.set(-0.7, TOP + 0.02, 0); lid.rotation.z = 0.5; body.add(lid);
+  lid.add(mesh(slab(1, 0.03, 0.02), pink, 0.7, 0, 0));
+  body.add(mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.56, 6), gold, 0.22, TOP + 0.25, -0.15)); // the lid's prop
+  for (const [x, z] of [[-0.58, 0.6], [0.58, 0.6], [-0.4, -1.0]]) {
+    body.add(mesh(new THREE.CylinderGeometry(0.075, 0.05, TOP - 0.36, 10), pink, x, (TOP - 0.36) / 2 + 0.04, z));
+    body.add(mesh(new THREE.SphereGeometry(0.06, 10, 8), gold, x, 0.04, z));
+  }
+  // the pedals: a little gold lyre under the keys
+  body.add(mesh(new THREE.BoxGeometry(0.16, 0.42, 0.05), pink, 0, 0.3, 0.5));
+  for (const x of [-0.05, 0, 0.05]) body.add(mesh(new THREE.BoxGeometry(0.03, 0.02, 0.1), gold, x, 0.07, 0.56));
+  // the keyboard: C3 .. B5 (21 white keys, 15 black), each its own key that dips when it plays
+  const KB = { x0: -0.64, w: 1.28, z: 0.88 }, wk = KB.w / 21;
+  body.add(mesh(new THREE.BoxGeometry(1.46, 0.1, 0.32), pink, 0, TOP - 0.24, 0.84)); // the key bed
+  for (const x of [-0.69, 0.69]) body.add(mesh(new THREE.BoxGeometry(0.08, 0.16, 0.32), pink, x, TOP - 0.17, 0.84)); // the cheek blocks
+  body.add(mesh(new THREE.BoxGeometry(1.4, 0.1, 0.05), pink, 0, TOP - 0.12, 0.7)); // the fallboard behind the keys
+  const mats = { w: mat('#fffdf7', { flatShading: false }), wd: mat('#ffd3e3', { flatShading: false }), b: mat('#3d3344', { flatShading: false }), bd: mat('#b3608a', { flatShading: false }) };
+  const keys = new Map(), whiteGeo = new THREE.BoxGeometry(wk * 0.9, 0.035, 0.26), blackGeo = new THREE.BoxGeometry(wk * 0.56, 0.04, 0.16);
+  const isBlack = (m) => [1, 3, 6, 8, 10].includes(((m % 12) + 12) % 12);
+  let wi = 0;
+  for (let m = PIANO_LOW; m <= PIANO_HIGH; m++) {
+    const black = isBlack(m), x = black ? KB.x0 + wi * wk : KB.x0 + (wi + 0.5) * wk;
+    const k = new THREE.Mesh(black ? blackGeo : whiteGeo, black ? mats.b : mats.w);
+    k.position.set(x, black ? TOP - 0.135 : TOP - 0.165, black ? KB.z - 0.05 : KB.z);
+    k.castShadow = false; body.add(k);
+    keys.set(m, { k, black, y: k.position.y, down: 0 });
+    if (!black) wi++;
+  }
+  // the music stand with a sheet of music: staff lines, round notes and tiny hearts (no words)
+  const sheetTex = canvasTex(160, 64, (c) => {
+    c.fillStyle = '#fffaf0'; c.fillRect(0, 0, 160, 64);
+    c.strokeStyle = '#b9a58c'; c.lineWidth = 1;
+    for (const y0s of [10, 38]) for (let l = 0; l < 5; l++) { c.beginPath(); c.moveTo(6, y0s + l * 4); c.lineTo(154, y0s + l * 4); c.stroke(); }
+    c.fillStyle = '#6a4b5a';
+    [[20, 22], [34, 18], [48, 14], [62, 20], [90, 16], [104, 12], [118, 18], [132, 22], [24, 46], [40, 50], [56, 42], [86, 48], [100, 44], [116, 40], [138, 46]].forEach(([x, y]) => { c.beginPath(); c.ellipse(x, y, 3, 2.3, -0.4, 0, TAU); c.fill(); c.fillRect(x + 2, y - 10, 1.2, 10); });
+    c.fillStyle = '#ef8fb1';
+    for (const [x, y] of [[76, 8], [148, 34]]) { c.beginPath(); c.moveTo(x, y + 5); c.bezierCurveTo(x - 6, y, x - 3, y - 4, x, y - 1); c.bezierCurveTo(x + 3, y - 4, x + 6, y, x, y + 5); c.fill(); }
+  });
+  const stand = new THREE.Group(); stand.position.set(0, TOP + 0.02, 0.62); stand.rotation.x = -0.28; body.add(stand);
+  stand.add(mesh(new THREE.BoxGeometry(0.72, 0.3, 0.025), pink, 0, 0.15, 0));
+  stand.add(mesh(new THREE.BoxGeometry(0.72, 0.03, 0.06), pink, 0, 0.0, 0.03));
+  const sheet = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.25), new THREE.MeshStandardMaterial({ map: sheetTex, roughness: 0.9 })); sheet.position.set(0, 0.16, 0.014); stand.add(sheet);
+  // the bench: a padded pink cushion with little buttons on a wooden frame
+  const BENCH = new THREE.Vector3(0, 0, 1.47);
+  {
+    const b = new THREE.Group(); b.position.copy(BENCH); g.add(b);
+    const wood = mat('#c98c52');
+    for (const [x, z] of [[-0.3, -0.13], [0.3, -0.13], [-0.3, 0.13], [0.3, 0.13]]) b.add(mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.4, 6), wood, x, 0.2, z));
+    b.add(mesh(new THREE.BoxGeometry(0.72, 0.06, 0.36), wood, 0, 0.42, 0));
+    const cushion = mesh(new THREE.BoxGeometry(0.7, 0.08, 0.34), mat('#ffc4d6', { flatShading: false }), 0, 0.49, 0); b.add(cushion);
+    for (const x of [-0.2, 0, 0.2]) b.add(mesh(new THREE.SphereGeometry(0.022, 6, 4), mat('#f28fb1'), x, 0.535, 0));
+  }
+  // flowers in pots round the rug's edge (not in front of the bench)
+  const blooms = ['#ffb3c9', '#fff1a8', '#c9b8ff', '#ffd0a8', '#ffffff'];
+  [[-1.75, 0.55], [1.7, 0.7], [1.55, -1.15], [-1.25, -1.45], [0.35, -1.85]].forEach(([x, z], i) => {
+    const f = new THREE.Group(); f.position.set(x, hAt(x, z) + 0.02, z); g.add(f);
+    f.add(mesh(new THREE.CylinderGeometry(0.15, 0.11, 0.22, 8), mat('#e6a07a'), 0, 0.11, 0));
+    for (let k = 0; k < 5; k++) { const a = k * 1.3 + i; f.add(mesh(new THREE.SphereGeometry(0.075, 7, 5), mat(blooms[(i + k) % blooms.length]), Math.cos(a) * 0.08, 0.3 + (k % 2) * 0.06, Math.sin(a) * 0.08)); }
+    f.add(mesh(new THREE.SphereGeometry(0.11, 6, 4), mat('#7cc46a'), 0, 0.22, 0));
+  });
+  // a lantern on a little post, and fairy lights strung on two poles behind the piano: they glow at dusk and night
+  const glows = [];
+  const lanternAt = new THREE.Vector3(-1.55, 0, -0.35);
+  {
+    const p = new THREE.Group(); p.position.set(lanternAt.x, hAt(lanternAt.x, lanternAt.z), lanternAt.z); g.add(p);
+    const wood = mat('#8a5a36');
+    p.add(mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.5, 6), wood, 0, 0.75, 0));
+    p.add(mesh(new THREE.BoxGeometry(0.34, 0.04, 0.05), wood, 0.13, 1.48, 0));
+    const lan = new THREE.Group(); lan.position.set(0.26, 1.24, 0); p.add(lan);
+    lan.add(mesh(new THREE.ConeGeometry(0.13, 0.1, 6), mat('#e98fae'), 0, 0.15, 0));
+    lan.add(mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.18, 6), M.lantern, 0, 0, 0));
+    lan.add(mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.03, 6), mat('#e98fae'), 0, -0.1, 0));
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffe2b0, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+    glow.scale.setScalar(1.6); lan.add(glow); glows.push({ glow, k: 0.85 });
+  }
+  const bulbCols = ['#ffb3cf', '#fff3c4', '#bff0dc', '#ffd2b0'];
+  const bulbMats = bulbCols.map((c) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.1, roughness: 0.4 }));
+  {
+    const ends = [new THREE.Vector3(-1.45, 0, -1.4), new THREE.Vector3(1.3, 0, -1.55)], hgt = 1.95, wood = mat('#8a5a36');
+    for (const e of ends) { e.y = hAt(e.x, e.z); g.add(mesh(new THREE.CylinderGeometry(0.035, 0.045, hgt, 6), wood, e.x, e.y + hgt / 2, e.z)); }
+    const pts = [];
+    for (let k = 0; k <= 24; k++) { const u = k / 24; pts.push(new THREE.Vector3(lerp(ends[0].x, ends[1].x, u), lerp(ends[0].y, ends[1].y, u) + hgt - 0.05 - Math.sin(u * Math.PI) * 0.38, lerp(ends[0].z, ends[1].z, u) - Math.sin(u * Math.PI) * 0.25)); }
+    g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.008, 4), mat('#5a4632')));
+    for (let k = 1; k < 14; k++) {
+      const q = pts[Math.round((k / 14) * 24)], b = mesh(new THREE.SphereGeometry(0.045, 8, 6), bulbMats[k % 4], q.x, q.y - 0.05, q.z); b.castShadow = false; g.add(b);
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: new THREE.Color(bulbCols[k % 4]), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+      glow.scale.setScalar(0.42); glow.position.copy(b.position); g.add(glow); glows.push({ glow, k: 0.6 });
+    }
+  }
+  // the piano's small collision (the rug, the bench and the flowers can be walked round and over)
+  { const c = toWorld(-0.15, 0, -0.1); colliders.push({ x: c.x, z: c.z, r: 1.0 }); const l = toWorld(lanternAt.x, 0, lanternAt.z); colliders.push({ x: l.x, z: l.z, r: 0.15 }); }
+  g.traverse((o) => { if (o.isMesh && o !== g) o.castShadow = o.castShadow && o.geometry.type !== 'RingGeometry'; });
+  return { g, y0, keys, mats, toWorld, bench: toWorld(BENCH.x, 0, BENCH.z), approach: toWorld(0, 0, 2.2), glows, bulbMats, top: TOP, heartsFrom: toWorld(0.05, 0, -0.15) };
+})();
+piano.bench.y = H(piano.bench.x, piano.bench.z) + 0.53; // the cushion's top
+piano.approach.y = 0;
+
+// ---- sound: the auto-play (from the shared clock), the players' notes, and how loud it is where you stand
+let pianoAutoSched = 0, pianoAutoFaded = false;
+const pianoLive = new Map(); // midi -> time (elapsed) its key lets go
+const pianoHands = new Map(); // player id -> { l, r }: a little tap of each hand as notes play
+function pianoVolume() {
+  if (myRoom !== null) return 0;
+  const d = Math.hypot(player.position.x - PIANO.x, player.position.z - PIANO.z);
+  return d >= PIANO.hear ? 0 : d <= 4 ? 1 : Math.pow(1 - (d - 4) / (PIANO.hear - 4), 1.6);
+}
+function pianoKeyNote(midi, local, who) { // one key played by a player: the sound, the key, the hand, a heart
+  if (sound.ready()) sound.note(midi, sound.ctx.currentTime + 0.005, 0.6, 0.85, sound.live);
+  pianoLive.set(midi, elapsed + 0.22);
+  const h = pianoHands.get(who) || { l: 0, r: 0 }; if (midi < 60) h.l = 1; else h.r = 1; pianoHands.set(who, h);
+  pianoHeart(1);
+  if (local) pianoOut.push(midi);
+}
+// ---- hearts: soft glowing pink, light pink and white hearts that float up from the piano, sway, grow and fade
+const HEART_MAX = 36;
+const heartTex = canvasTex(64, 64, (c) => {
+  c.shadowColor = 'rgba(255, 255, 255, 0.95)'; c.shadowBlur = 9;
+  c.fillStyle = '#ffffff'; c.beginPath(); c.moveTo(32, 54); c.bezierCurveTo(2, 34, 10, 6, 32, 20); c.bezierCurveTo(54, 6, 62, 34, 32, 54); c.fill();
+});
+const heartCols = [0xff8fb8, 0xff8fb8, 0xffb6d0, 0xff6fa3, 0xffffff, 0xffd6e6];
+const hearts = [];
+for (let i = 0; i < HEART_MAX; i++) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: heartTex, transparent: true, depthWrite: false, fog: false, opacity: 0 }));
+  s.visible = false; s.renderOrder = 3; scene.add(s);
+  hearts.push({ s, t: 0, life: 0, x: 0, z: 0, y: 0, ph: 0, rise: 0, size: 0 });
+}
+let heartNext = 0;
+function pianoHeart(n, big) {
+  if (myRoom !== null || Math.hypot(player.position.x - PIANO.x, player.position.z - PIANO.z) > 40) return; // only nearby players see them
+  for (let k = 0; k < n; k++) {
+    const h = hearts.find((q) => q.life <= 0) || hearts[heartNext++ % HEART_MAX];
+    const a = Math.random() * TAU, r = Math.random() * (big ? 0.7 : 0.45);
+    h.x = piano.heartsFrom.x + Math.cos(a) * r; h.z = piano.heartsFrom.z + Math.sin(a) * r; h.y = piano.y0 + piano.top + 0.15 + Math.random() * 0.2;
+    h.t = 0; h.life = 2.6 + Math.random() * 0.8; h.ph = Math.random() * TAU; h.rise = 0.55 + Math.random() * 0.35 + (big ? 0.3 : 0); h.size = (big ? 0.26 : 0.2) + Math.random() * 0.08;
+    h.s.material.color.setHex(heartCols[Math.floor(Math.random() * heartCols.length)]);
+    h.s.visible = true;
+  }
+}
+function updateHearts(dt) {
+  for (const h of hearts) {
+    if (h.life <= 0) continue;
+    h.t += dt;
+    if (h.t >= h.life || myRoom !== null) { h.life = 0; h.s.visible = false; h.s.material.opacity = 0; continue; }
+    const u = h.t / h.life;
+    h.s.position.set(h.x + Math.sin(h.t * 2.2 + h.ph) * 0.18, h.y + h.rise * h.t, h.z + Math.cos(h.t * 1.7 + h.ph) * 0.12);
+    h.s.scale.setScalar(h.size * (0.75 + u * 0.55));
+    h.s.material.opacity = Math.min(1, h.t / 0.25) * (u > 0.65 ? 1 - (u - 0.65) / 0.35 : 1) * 0.95;
+    h.s.material.rotation = Math.sin(h.t * 2.2 + h.ph) * 0.25;
+  }
+}
+
+// ---- the pianist: sitting on the bench, hands on the keys (each hand taps as its notes play)
+function placeAtPiano(character, charRig, who, dt, time) {
+  character.position.set(piano.bench.x, piano.bench.y - 0.5, piano.bench.z);
+  character.rotation.y = PIANO.face + Math.PI; character.rotation.x = 0;
+  animateRig(charRig, dt, time, false, 0, 0);
+  charRig.legL.rotation.x = charRig.legR.rotation.x = -1.45;
+  charRig.body.rotation.x = 0.08; charRig.body.position.y = 0.55;
+  const h = pianoHands.get(who) || { l: 0, r: 0 };
+  h.l = Math.max(0, h.l - dt * 6); h.r = Math.max(0, h.r - dt * 6); pianoHands.set(who, h);
+  charRig.armL.rotation.x = -1.15 + h.l * 0.3 + Math.sin(time * 1.3) * 0.03;
+  charRig.armR.rotation.x = -1.15 + h.r * 0.3 + Math.sin(time * 1.3 + 1) * 0.03;
+  charRig.armL.rotation.z = 0.12; charRig.armR.rotation.z = -0.12;
+  charRig.head.rotation.x = 0.12; charRig.head.rotation.y = Math.sin(time * 0.6) * 0.15;
+}
+
+// ---- the state: who sits there (server online, here offline)
+let pianoWasMe = false, pianoWasWho = null;
+function pianoChanged() {
+  const me = pianoMe();
+  if (me && !pianoWasMe) { // sat down: the keyboard panel slides up
+    walk.target = null; walk.route = null; walk.item = null; walk.tree = null; walk.cast = null; walk.bug = null; walk.water = null; walk.seat = null; walk.piano = false;
+    if (fishing) endFishing();
+    document.body.classList.add('piano');
+    pianoPanel.classList.add('open');
+  } else if (!me && pianoWasMe) { // stood up: back on the rug in front of the bench
+    document.body.classList.remove('piano');
+    pianoPanel.classList.remove('open');
+    pianoDemoStop();
+    for (const k of pianoKeyEls.values()) k.classList.remove('down', 'lit', 'next');
+    if (myRoom === null) { player.position.set(piano.approach.x, groundY(piano.approach.x, piano.approach.z), piano.approach.z); walk.heading = PIANO.face; }
+    player.rotation.x = 0;
+  }
+  if (pianoS.who !== null && pianoWasWho === null && sound.ready()) { sound.auto.gain.cancelScheduledValues(sound.ctx.currentTime); sound.auto.gain.setTargetAtTime(0, sound.ctx.currentTime, 0.3); pianoAutoFaded = true; }
+  pianoWasMe = me; pianoWasWho = pianoS.who;
+}
+function applyPiano(m) {
+  pianoS = { who: m.who ?? null, name: m.name || '', auto0: Number.isFinite(m.auto0) ? m.auto0 : nowMs() };
+  pianoChanged();
+}
+function pianoResult(m) {
+  if (m.who !== undefined) applyPiano(m);
+  const why = { taken: 'Someone else is playing the piano', far: 'Walk up to the piano bench first', seat: 'Stand up first', bike: 'Park the bicycle first', ride: 'Finish the ride first', balloon: 'Get out of the balloon first', banana: 'Get off the banana boat first', volley: 'Leave the volleyball court first' }[m.why];
+  if (why) toast(why);
+}
+function pianoRequest() {
+  if (pianoS.who !== null) { if (!pianoMe()) toast('Someone else is playing the piano'); return; }
+  if (net.online) { net.send({ t: 'pianoSit' }); return; }
+  pianoS = { who: net.id, name: net.myName || 'You', auto0: pianoS.auto0 }; pianoChanged();
+}
+function pianoStand() {
+  if (!pianoMe()) return;
+  if (net.online) net.send({ t: 'pianoStand' });
+  pianoS = { who: null, name: '', auto0: nowMs() + PIANO.resumeMs }; pianoChanged();
+}
+function pianoBlocked() { if (!pianoMe()) return false; toast('Stand up from the piano first'); return true; }
+function pianoRemoteNote(m) {
+  if (m.id === net.id) return;
+  for (const midi of (m.n || []).slice(0, 6)) if (Number.isInteger(midi)) pianoKeyNote(midi, false, m.id);
+  if (m.b) pianoHeart(14, true);
+}
+
+// ---- the keyboard panel: two octaves (C4 .. B5), multi-touch, a demo song with the keys lighting up in order
+const pianoPanel = document.getElementById('pianoPanel');
+const pianoKeyEls = new Map(); // midi -> element
+const pianoOut = []; // notes to send (a few each frame)
+let pianoTok = 24, pianoTokAt = 0;
+{
+  const wrap = document.getElementById('pianoKeys');
+  const whites = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79, 81, 83], blacks = [[61, 1], [63, 2], [66, 4], [68, 5], [70, 6], [73, 8], [75, 9], [78, 11], [80, 12], [82, 13]];
+  whites.forEach((m) => { const k = document.createElement('div'); k.className = 'pk white'; k.dataset.m = String(m); wrap.appendChild(k); pianoKeyEls.set(m, k); });
+  for (const [m, after] of blacks) { const k = document.createElement('div'); k.className = 'pk black'; k.dataset.m = String(m); k.style.left = `calc(${((after / 14) * 100).toFixed(3)}% - 3.4%)`; wrap.appendChild(k); pianoKeyEls.set(m, k); }
+  const held = new Map(); // pointer id -> key element
+  const press = (el) => { if (!el || !pianoMe()) return; el.classList.add('down'); pianoKeyNote(Number(el.dataset.m), true, net.id); };
+  const keyAt = (e) => { const t = document.elementFromPoint ? document.elementFromPoint(e.clientX, e.clientY) : e.target; return t && t.closest ? t.closest('.pk') : null; };
+  const let_go = (id) => { const el = held.get(id); held.delete(id); if (el && ![...held.values()].includes(el)) el.classList.remove('down'); };
+  wrap.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); sound.start();
+    const el = e.target && e.target.closest ? e.target.closest('.pk') : null;
+    if (!el) return;
+    try { wrap.setPointerCapture(e.pointerId); } catch { /* fine without */ }
+    held.set(e.pointerId, el); press(el);
+  });
+  wrap.addEventListener('pointermove', (e) => { // sliding a finger along the keys plays each one it reaches
+    if (!held.has(e.pointerId)) return;
+    const el = keyAt(e);
+    if (el && el !== held.get(e.pointerId)) { let_go(e.pointerId); held.set(e.pointerId, el); press(el); }
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) wrap.addEventListener(ev, (e) => let_go(e.pointerId));
+  document.getElementById('pianoClose').addEventListener('click', () => pianoStand());
+  document.getElementById('pianoDemo').addEventListener('click', () => { sound.start(); if (pianoDemo) pianoDemoStop(); else pianoDemoStart(); });
+}
+let pianoDemo = null; // { t0, i } while the demo song plays
+function pianoDemoStart() {
+  if (!pianoMe()) return;
+  pianoDemo = { t0: elapsed + 0.6, i: 0 };
+  document.getElementById('pianoDemo').classList.add('on');
+}
+function pianoDemoStop() {
+  pianoDemo = null;
+  document.getElementById('pianoDemo').classList.remove('on');
+  for (const k of pianoKeyEls.values()) k.classList.remove('lit', 'next');
+}
+function updatePianoDemo() {
+  if (!pianoDemo) return;
+  if (!pianoMe()) { pianoDemoStop(); return; }
+  const t = (elapsed - pianoDemo.t0) * 1000;
+  while (pianoDemo.i < PIANO_DEMO.length && PIANO_DEMO[pianoDemo.i].t <= t) {
+    const n = PIANO_DEMO[pianoDemo.i++], el = pianoKeyEls.get(n.m);
+    pianoKeyNote(n.m, true, net.id);
+    if (el) { el.classList.remove('next'); el.classList.add('lit'); setTimeout(() => el.classList.remove('lit'), Math.min(n.d, 450)); }
+  }
+  for (const k of pianoKeyEls.values()) k.classList.remove('next');
+  const nx = PIANO_DEMO[pianoDemo.i];
+  if (nx) { const el = pianoKeyEls.get(nx.m); if (el && !el.classList.contains('lit')) el.classList.add('next'); }
+  else if (t > PIANO_DEMO[PIANO_DEMO.length - 1].t + 700) { // the end: a big burst of hearts, for everyone nearby too
+    pianoHeart(14, true);
+    if (net.online) net.send({ t: 'pianoNote', n: [], b: 1 });
+    pianoDemoStop();
+  }
+}
+
+// the floating "Play" circle on the bench, and the player's name over whoever is playing
+const PIANO_ICON = '<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="14" width="36" height="22" rx="5" fill="#fffaf0" stroke="#b3608a" stroke-width="2.5"/><path d="M14 15 v12 M24 15 v12 M34 15 v12" stroke="#b3608a" stroke-width="2"/><rect x="11.5" y="15" width="5" height="11" rx="1.5" fill="#3d3344"/><rect x="21.5" y="15" width="5" height="11" rx="1.5" fill="#3d3344"/><rect x="31.5" y="15" width="5" height="11" rx="1.5" fill="#3d3344"/><path d="M38 6 c-3 -3 -7 0 -4 4 l4 4 l4 -4 c3 -4 -1 -7 -4 -4z" fill="#f28fb1"/></svg>';
+const pianoBubble = makeDoorBubble(PIANO_ICON, 'Play the piano', () => {
+  if (bikeRide) { toast('Park the bicycle first'); return; }
+  if (pianoS.who !== null) { toast('Someone else is playing the piano'); return; }
+  if (mySeat !== null) standUp();
+  walk.item = null; walk.tree = null; walk.cast = null; walk.bug = null; walk.water = null; walk.seat = null; walk.door = null; walk.talk = null;
+  walk.piano = true; walk.target = new THREE.Vector3(piano.approach.x, 0, piano.approach.z);
+});
+pianoBubble.btn.classList.add('piano-bubble');
+const pianoLabel = document.createElement('div'); pianoLabel.className = 'vol-label piano-label'; seatLayer.appendChild(pianoLabel);
+const _pianoV = new THREE.Vector3();
+
+// ---- every frame
+function updatePiano(dt, time) {
+  const now = nowMs(), near = myRoom === null && Math.hypot(player.position.x - PIANO.x, player.position.z - PIANO.z) < 45;
+  if (!net.online && pianoS.who !== null && pianoS.who !== net.id) { pianoS = { who: null, name: '', auto0: now + PIANO.resumeMs }; pianoChanged(); } // solo: nobody else
+  if (pianoWasMe && !pianoMe()) pianoChanged(); // went indoors, or the server moved us off
+  const autoOn = pianoS.who === null && now >= pianoS.auto0;
+  // sound
+  const vol = pianoVolume();
+  if (sound.ready()) {
+    sound.piano.gain.setTargetAtTime(vol, sound.ctx.currentTime, 0.12);
+    if (autoOn && vol > 0.001) {
+      if (pianoAutoFaded) { sound.auto.gain.cancelScheduledValues(sound.ctx.currentTime); sound.auto.gain.setValueAtTime(1, sound.ctx.currentTime); pianoAutoFaded = false; }
+      if (pianoAutoSched < now) pianoAutoSched = now;
+      const to = now + 250;
+      for (const n of pianoAutoNotes(pianoAutoSched, to, pianoS.auto0)) sound.note(n.m, sound.ctx.currentTime + (n.at - now) / 1000, n.d / 1000, n.v, sound.auto);
+      pianoAutoSched = to;
+    } else pianoAutoSched = now + 250;
+  }
+  // the keys: pressed by the auto-play or by a player
+  if (near) {
+    const auto = autoOn ? pianoAutoNotes(now - 450, now + 1, pianoS.auto0) : [];
+    for (const [m, key] of piano.keys) {
+      const down = (pianoLive.get(m) || 0) > time || auto.some((n) => n.m === m && now < n.at + Math.min(n.d, 320));
+      key.down += ((down ? 1 : 0) - key.down) * Math.min(1, dt * 30);
+      key.k.position.y = key.y - key.down * 0.018;
+      key.k.material = down ? (key.black ? piano.mats.bd : piano.mats.wd) : key.black ? piano.mats.b : piano.mats.w;
+    }
+    // a few hearts drift up while it plays by itself
+    if (autoOn && pianoPiecesIn(now, now + 1, pianoS.auto0).length) { piano.heartT = (piano.heartT ?? 1) - dt; if (piano.heartT <= 0) { piano.heartT = 0.9 + Math.random() * 0.8; pianoHeart(1); } }
+  }
+  updateHearts(dt);
+  // the lights: off by day, glowing at dusk and night
+  const on = cur.lamp;
+  for (const b of piano.bulbMats) b.emissiveIntensity = 0.12 + on * 1.7;
+  for (const gl of piano.glows) gl.glow.material.opacity = on * gl.k;
+  // sending my notes: a few per message, no faster than the server allows
+  if (pianoOut.length) {
+    pianoTok = Math.min(24, pianoTok + (time - pianoTokAt) * 16); pianoTokAt = time;
+    const n = [];
+    while (pianoOut.length && n.length < 6 && pianoTok >= 1) { n.push(pianoOut.shift()); pianoTok--; }
+    if (pianoOut.length > 12) pianoOut.length = 0;
+    if (n.length && net.online && pianoMe()) net.send({ t: 'pianoNote', n });
+  } else pianoTokAt = time;
+  updatePianoDemo();
+  // the Play circle and the name label
+  _pianoV.set(piano.bench.x, piano.bench.y + 0.45, piano.bench.z);
+  const free = pianoS.who === null && myRoom === null && mySeat === null && !walk.piano && !bikeRide && !myRide && myBalloonSpot() === null && !myBananaSeat() && volMine() === null && !isSwimming();
+  placeBubble(pianoBubble, _pianoV, free && Math.hypot(player.position.x - piano.bench.x, player.position.z - piano.bench.z) <= 3);
+  let label = false;
+  if (pianoS.who !== null && near) {
+    _pianoV.set(piano.bench.x, piano.bench.y + 1.75, piano.bench.z).project(camera);
+    const x = (_pianoV.x * 0.5 + 0.5) * window.innerWidth, y = (-_pianoV.y * 0.5 + 0.5) * window.innerHeight;
+    if (_pianoV.z < 1 && x > -60 && y > -40 && x < window.innerWidth + 60 && y < window.innerHeight + 40) {
+      label = true;
+      const txt = `🎹 ${pianoMe() ? 'You' : pianoS.name || 'Someone'}`;
+      if (pianoLabel.textContent !== txt) pianoLabel.textContent = txt;
+      pianoLabel.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
+    }
+  }
+  if (label !== !!pianoLabel._on) { pianoLabel._on = label; pianoLabel.classList.toggle('show', label); }
+}
 const PROTOCOL = 9; // must match PROTOCOL in server.js
 const playersEl = document.getElementById('players');
 const net = {
@@ -8145,6 +8604,9 @@ function handleNet(m) {
   if (m.t === 'balloon') { applyBalloon(m); return; }
   if (m.t === 'banana') { applyBanana(m); return; }
   if (m.t === 'volley') { applyVolley(m); return; }
+  if (m.t === 'piano') { applyPiano(m); return; }
+  if (m.t === 'pianoNote') { pianoRemoteNote(m); return; }
+  if (m.t === 'pianoResult') { pianoResult(m); return; }
   if (m.t === 'volleyResult') { volResult(m.why); return; }
   if (m.t === 'bananaResult') { toast({ away: 'That boat is out on the water, wait for it to come back', taken: 'Someone just took that seat', far: 'Walk out onto the jetty first', balloon: 'Get out of the balloon first', bike: 'Park the bicycle first' }[m.why] || "You can't get on right now"); return; }
   if (m.t === 'balloonResult') { toast({ flying: 'The balloon is up in the air, wait for it to land', full: 'The basket is full (4 at most)', far: 'Walk up to the balloon first', bike: 'Park the bicycle first' }[m.why] || "You can't board right now"); return; }
@@ -8222,6 +8684,7 @@ function handleNet(m) {
     if (m.balloon) applyBalloon(m.balloon);
     if (m.banana) applyBanana(m.banana);
     if (m.volley) { volLocal = null; applyVolley(m.volley); }
+    if (m.piano) applyPiano(m.piano);
     if (Number.isFinite(m.dolphinSeed)) dolphinSeed = m.dolphinSeed;
     if (Number.isFinite(m.pondSeed)) pondSeed = m.pondSeed;
     const treeState = new Map(m.trees || []), bugState = new Map((m.bugs || []).map(([id, gen, at]) => [id, { gen, at }]));
@@ -8308,6 +8771,7 @@ function updateNet(dt, time) {
     r.player.rotation.z = 0;
     const riding = rideOf(rid);
     if (riding) { placeRiding(r.player, r.rig, riding.kind, riding.seat, dt, time); continue; }
+    if (pianoS.who === rid && !r.room) { placeAtPiano(r.player, r.rig, rid, dt, time); continue; }
     const seated = seatOfPlayer(rid);
     if (seated !== null) { placeSeated(r.player, r.rig, seatSpots[seated], dt, time); continue; }
     r.player.rotation.x = 0;
@@ -8433,6 +8897,7 @@ function frame(now) {
   updateCamera(dt);
   updateParasolFade(dt);
   updateVolley(dt, elapsed); // after the players and the camera: jumps, the ball, the floating buttons
+  updatePiano(dt, elapsed); // the piano's music, keys, hearts, lights, its Play circle and the pianist's name
   updateSeatBubbles(); // after the camera moved, so the circles sit exactly over their seats
   updateDoorBubbles();
   updateBikeBubble();

@@ -272,6 +272,19 @@ function boardRide(p, kind, want) {
 // ---------------------------------------------------------------- home plots: 8 around the town, one per account, for good
 const PLOT_COUNT = 8;
 // the island's layout (plots, roads, Bo's walk) comes from island.js, the same file the game uses
+// ---- the town piano: who sits at it (one player at a time), when its auto-play loop (re)starts (everyone plays the
+// same piece from the shared clock), and the notes of whoever plays it relayed to everyone else. Nothing is saved.
+const { PIANO } = require('./island.js');
+const piano = { who: null, name: '', auto0: Date.now() };
+const pianoMsg = () => ({ t: 'piano', who: piano.who, name: piano.name, auto0: piano.auto0 });
+function pianoFree(id) { // the bench is free again; the piano starts playing by itself after a little while
+  if (piano.who === null || piano.who !== id) return false;
+  piano.who = null; piano.name = ''; piano.auto0 = Date.now() + PIANO.resumeMs;
+  return true;
+}
+const nearPiano = (p) => Number.isFinite(p.x) && !p.room && Math.hypot(p.x - PIANO.x, p.z - PIANO.z) < 4.5;
+const PIANO_NOTES_PER_S = 16, PIANO_BURST = 24; // the most notes anyone can send: 16 a second, short bursts of 24
+
 const { LAYOUT, buildBoRoute, routeAt } = require('./island.js');
 const plotCentre = (n) => LAYOUT.plots[n - 1];
 // the garden sits inside the plot (within ~3 of its centre); a can reaches about 3 more
@@ -521,7 +534,7 @@ wss.on('connection', (ws) => {
       gardens: gardenList(),
       islandWatered, islandHarvested,
       garden: { growMs: GARDEN_GROW_MS, wetMs: GARDEN_WET_MS },
-      seats: [...seats.entries()], swing, rides: ridesMsg(), bikes: [...bikes.values()].map(bikePub), balloon: balloonMsg(), banana: bananaMsg(), volley: volleyMsg(), dolphinSeed: DOLPHIN_SEED, pondSeed: POND_SEED,
+      seats: [...seats.entries()], swing, rides: ridesMsg(), bikes: [...bikes.values()].map(bikePub), balloon: balloonMsg(), banana: bananaMsg(), volley: volleyMsg(), piano: pianoMsg(), dolphinSeed: DOLPHIN_SEED, pondSeed: POND_SEED,
       bo: boMsg(), sellPrices: SELL_PRICES,
     });
     if (newHouse) broadcast({ t: 'house', plot: acc.plot, name: acc.name, roof: acc.roof }, ws);
@@ -538,11 +551,13 @@ wss.on('connection', (ws) => {
       try { await authenticate(msg); } catch { send(ws, { t: 'authError', msg: 'Something went wrong, please try again.' }); } finally { busy = false; }
       return;
     }
+    if (piano.who === p.id && ['sit', 'ride', 'bikeMount', 'balloonBoard', 'bananaBoard', 'volleyJoin'].includes(msg.t)) return; // at the piano: stand up first
     if (msg.t === 'logout') {
       if (typeof msg.token === 'string') delete accounts.sessions[sha256(msg.token)];
       accountsDirty = true;
       ws.close(); // the close handler saves progress
     } else if (msg.t === 'enter') {
+      if (pianoFree(p.id)) broadcast(pianoMsg()); // going indoors: off the piano bench
       // every outcome gets an answer, so the client can always tell the player what happened
       const plot = msg.plot;
       if (!Number.isInteger(plot) || plot < 1 || plot > PLOT_COUNT) return send(ws, { t: 'roomError', msg: "That house doesn't exist" });
@@ -727,6 +742,23 @@ wss.on('connection', (ws) => {
     } else if (msg.t === 'volleyHit') {
       const why = volley.hit(p.id, Number(msg.at), Number(msg.tx), Number(msg.tz));
       if (why) send(ws, { t: 'volleyResult', why });
+    } else if (msg.t === 'pianoSit') { // the piano bench, from beside it, when nobody else is playing
+      const bk = bikes.get(p.id), riding = Object.values(rideOcc).some((m) => [...m.values()].some((o) => o.id === p.id));
+      const why = piano.who !== null && piano.who !== p.id ? 'taken' : !nearPiano(p) ? 'far' : [...seats.values()].includes(p.id) ? 'seat' : bk && bk.riding ? 'bike'
+        : riding ? 'ride' : balloonSpot(p.id) >= 0 ? 'balloon' : bananaSeatOf(p.id) ? 'banana' : volley.sideOf(p.id) >= 0 ? 'volley' : null;
+      if (why) return send(ws, { t: 'pianoResult', why, ...pianoMsg() });
+      if (piano.who !== p.id) { piano.who = p.id; piano.name = p.name; p.pianoTok = PIANO_BURST; p.pianoAt = Date.now(); broadcast(pianoMsg()); }
+    } else if (msg.t === 'pianoStand') {
+      if (pianoFree(p.id)) broadcast(pianoMsg());
+    } else if (msg.t === 'pianoNote') { // keys the player pressed (a few at once): passed on to everyone else
+      if (piano.who !== p.id || !Array.isArray(msg.n)) return;
+      const now = Date.now();
+      p.pianoTok = Math.min(PIANO_BURST, (p.pianoTok ?? PIANO_BURST) + ((now - (p.pianoAt || now)) / 1000) * PIANO_NOTES_PER_S); p.pianoAt = now;
+      const n = [];
+      for (const m of msg.n.slice(0, 6)) if (Number.isInteger(m) && m >= 36 && m <= 96 && p.pianoTok >= 1) { p.pianoTok--; n.push(m); }
+      const b = msg.b === 1 && now - (p.pianoBurstAt || 0) > 3000 ? 1 : 0; // the hearts at the end of the demo song
+      if (b) p.pianoBurstAt = now;
+      if (n.length || b) broadcast({ t: 'pianoNote', id: p.id, n, b }, ws);
     } else if (msg.t === 'sit') {
       if (volley.sideOf(p.id) >= 0) return; // playing volleyball
       if (p.room) return; // the island's benches, not from inside a house
@@ -814,6 +846,7 @@ wss.on('connection', (ws) => {
       p.x = x; p.z = z; p.h = Number.isFinite(h) ? h : 0; p.m = msg.m ? 1 : 0;
       const y = Number(msg.y); p.y = Number.isFinite(y) && y > -1 && y < 12 ? y : null; // up on a beach cabin's balcony or bridge
       broadcast(first ? { t: 'join', p: pub(p) } : { t: 'move', id: p.id, x, z, h: p.h, m: p.m, y: p.y }, ws);
+      if (piano.who === p.id && !nearPiano(p) && pianoFree(p.id)) broadcast(pianoMsg()); // walked off without standing up
     } else if (msg.t === 'pick') {
       const id = Number(msg.item);
       if (!Number.isInteger(id) || id < 0 || id > 10000) return;
@@ -863,6 +896,7 @@ wss.on('connection', (ws) => {
     dropBike(p, 'fade'); // their bicycle fades away
     if (balloonLeave(p.id)) broadcast(balloonMsg()); // and their spot in the balloon is free
     volley.leave(p.id); // their side of the volleyball court is free (a match in play goes to the other player)
+    if (pianoFree(p.id)) broadcast(pianoMsg()); // and the piano bench
     { const at = bananaSeatOf(p.id); if (at) { bananas[at.boat].riders[at.seat] = null; if (bananas[at.boat].s === 'wait' && !bananas[at.boat].riders.some((r) => r !== null)) bananas[at.boat].first = 0; broadcast(bananaMsg()); } }
     broadcast({ t: 'leave', id: p.id });
     broadcast({ t: 'count', n: players.size });

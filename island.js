@@ -523,6 +523,84 @@ export function pondR(th) {
 export const POND_DOCK = { a: [-10.15, -24.65], b: [-12.45, -23.05], ya: 0.87, yb: 0.6, hw: 0.55 }; // the little dock: from the lawn (bank end) gently down over the water
 export const atPond = (x, z) => Number.isFinite(x) && Math.hypot(x - LAYOUT.pond.x, z - LAYOUT.pond.z) < LAYOUT.pond.r + 3.2; // fishing here gives pond catches
 
+// ---- the town piano: a little grand piano on a round rug on the open lawn east of the plaza (between the pet shop and
+// the Ferris wheel), its keyboard and bench toward the fountain. When nobody sits at it, it plays a loop of short
+// original pieces by itself, timed from the shared clock (auto0: when the loop last (re)started, set by the server),
+// so everyone nearby hears the same note at the same moment.
+export const PIANO = { x: 14, z: -11.9, face: Math.atan2(LAYOUT.plaza.x - 14, LAYOUT.plaza.z + 11.9), hear: 25, resumeMs: 10000, gapMs: 3500 };
+// the pieces, composed for the island. mel: "degree:beats" (degree 0 = the key's tonic, counted along its scale; r = a
+// rest); prog: the chord under each bar (a scale degree); hand: how the left hand plays it
+const PIANO_SCORES = [
+  { name: 'Morning Tide', key: 60, scale: 'major', beats: 4, bpm: 92, hand: 'arp', prog: '0 5 3 4 0 3 4 0',
+    mel: '4:1 7:1 6:.5 4:.5 5:1  7:1.5 9:.5 8:2  5:1 7:1 9:1 11:1  10:1.5 9:.5 8:2  4:1 7:1 6:.5 4:.5 2:1  3:1 5:1 9:1 8:1  7:.5 8:.5 9:1 8:1 6:1  7:3 r:1' },
+  { name: 'Lantern Waltz', key: 65, scale: 'major', beats: 3, bpm: 126, hand: 'waltz', prog: '0 0 4 0 1 3 0 3 0 3 4 0',
+    mel: '4:2 5:1  4:1 2:1 0:1  1:2 2:1  4:3  5:2 6:1  7:1 6:1 5:1  4:1 5:1 2:1  3:3  2:2 4:1  7:2 6:1  5:1 3:1 1:1  0:3' },
+  { name: 'Sleepy Kitten', key: 67, scale: 'major', beats: 4, bpm: 76, hand: 'block', prog: '0 2 3 4 0 5 4 0',
+    mel: '2:1 1:.5 0:.5 1:2  2:1 4:1 2:2  3:1 2:.5 1:.5 2:1 4:1  1:4  2:1 1:.5 0:.5 -1:2  0:1 2:1 5:2  4:1 3:1 2:1 1:1  0:4' },
+  { name: 'Raindrop Steps', key: 62, scale: 'major', beats: 4, bpm: 104, hand: 'arp', prog: '0 4 5 0 0 5 4 0',
+    mel: '7:.5 6:.5 4:.5 2:.5 4:1 7:1  8:1.5 7:.5 6:2  5:.5 4:.5 2:.5 0:.5 2:1 5:1  4:3 r:1  7:.5 9:.5 8:.5 7:.5 6:1 4:1  5:1 7:1 9:2  8:1 6:1 4:1 6:1  7:3 r:1' },
+  { name: 'Cloud Boat', key: 69, scale: 'minor', beats: 4, bpm: 84, hand: 'arp', prog: '0 6 2 4 0 5 3 0',
+    mel: '4:1 2:.5 4:.5 7:2  6:1 5:.5 4:.5 3:2  2:1 3:.5 4:.5 5:1 4:1  1:3 r:1  4:1 2:.5 4:.5 8:2  7:1 6:.5 5:.5 4:2  3:1 2:1 1:1 2:1  0:4' },
+  { name: 'Firefly Lullaby', key: 70, scale: 'major', beats: 3, bpm: 96, hand: 'waltz', prog: '0 3 0 5 0 4 4 0',
+    mel: '4:2 2:1  3:1 4:1 5:1  4:2 0:1  2:3  4:2 7:1  6:1 5:1 4:1  3:1 1:1 2:1  0:3' },
+  { name: 'Seashell Song', key: 60, scale: 'major', beats: 4, bpm: 112, hand: 'arp', prog: '0 3 1 4 0 5 4 0',
+    mel: '0:.5 2:.5 4:.5 7:.5 6:1 4:1  5:.5 4:.5 3:.5 2:.5 3:2  1:.5 3:.5 5:.5 8:.5 7:1 5:1  4:3 r:1  7:.5 9:.5 11:.5 9:.5 8:1 7:1  5:1 6:1 7:1 9:1  8:1.5 7:.5 6:1 8:1  7:3 r:1' },
+];
+const PIANO_SCALES = { major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10] };
+export const PIANO_LOW = 48, PIANO_HIGH = 83; // the 3D piano's keys: C3 .. B5
+const scaleNote = (sc, key, d) => key + sc[((d % 7) + 7) % 7] + 12 * Math.floor(d / 7);
+const keepOnKeys = (m) => { while (m < PIANO_LOW) m += 12; while (m > PIANO_HIGH) m -= 12; return m; };
+// one piece as notes { t: ms from its start, m: midi, d: ms held, v: loudness 0..1, h: 0 left hand / 1 right hand }
+function scoreNotes(s) {
+  const sc = PIANO_SCALES[s.scale], beat = 60000 / s.bpm, notes = [];
+  let b = 0;
+  for (const tok of s.mel.trim().split(/\s+/)) {
+    const [dg, len] = tok.split(':'), l = Number(len);
+    if (dg !== 'r') notes.push({ t: b * beat, m: keepOnKeys(scaleNote(sc, s.key, Number(dg))), d: Math.max(l, 0.5) * beat * 1.05, v: 0.8, h: 1 });
+    b += l;
+  }
+  s.prog.trim().split(/\s+/).forEach((c, bar) => {
+    const root = Number(c), t0 = bar * s.beats * beat, low = s.key - 12;
+    const tone = (k) => keepOnKeys(scaleNote(sc, low, root + k));
+    const add = (at, k, d, v) => notes.push({ t: t0 + at * beat, m: tone(k), d: d * beat, v, h: 0 });
+    if (s.hand === 'arp') [0, 4, 9, 4, 0, 4, 9, 4].forEach((k, i) => add(i * 0.5, k, 1, i % 4 ? 0.34 : 0.46));
+    else if (s.hand === 'waltz') { add(0, 0, 3, 0.48); for (const at of [1, 2]) { add(at, 2, 0.9, 0.3); add(at, 4, 0.9, 0.3); } }
+    else { for (const k of [0, 4, 9]) add(0, k, 4, 0.4); for (const k of [4, 9]) add(2, k, 2, 0.26); }
+  });
+  notes.sort((a, c) => a.t - c.t);
+  return { name: s.name, notes, len: b * beat + 600 };
+}
+export const PIANO_PIECES = PIANO_SCORES.map(scoreNotes);
+// the demo song in the keyboard panel: the first piece's tune alone (all on the panel's two octaves, C4 .. B5)
+export const PIANO_DEMO = PIANO_PIECES[0].notes.filter((n) => n.h === 1).map((n) => ({ t: n.t, m: n.m, d: n.d }));
+// the auto-play loop from auto0: every piece once (starting with a different one each time it restarts), a soft pause
+// after each. Returns [{ i, start, len }] for the pieces overlapping [from, to)
+function pianoOrder(auto0) {
+  const n = PIANO_PIECES.length, first = Math.floor(auto0 / 1000) % n, order = [];
+  let off = 0;
+  for (let k = 0; k < n; k++) { const i = (first + k) % n; order.push({ i, off }); off += PIANO_PIECES[i].len + PIANO.gapMs; }
+  return { order, cycle: off };
+}
+export function pianoPiecesIn(from, to, auto0) {
+  if (!Number.isFinite(auto0) || to <= auto0) return [];
+  const { order, cycle } = pianoOrder(auto0), out = [];
+  const c0 = Math.max(0, Math.floor((from - auto0) / cycle) - 1), c1 = Math.floor((to - auto0) / cycle);
+  for (let c = c0; c <= c1; c++) for (const o of order) {
+    const start = auto0 + c * cycle + o.off, len = PIANO_PIECES[o.i].len;
+    if (start < to && start + len > from) out.push({ i: o.i, start, len });
+  }
+  return out;
+}
+// the auto-play notes that start in [from, to): { at (shared-clock ms), m, d, v }
+export function pianoAutoNotes(from, to, auto0) {
+  const out = [];
+  for (const p of pianoPiecesIn(from, to, auto0)) for (const n of PIANO_PIECES[p.i].notes) {
+    const at = p.start + n.t;
+    if (at >= from && at < to) out.push({ at, m: n.m, d: n.d, v: n.v });
+  }
+  return out;
+}
+
 export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
   const C = (h) => new THREE.Color(h);
   const L = LAYOUT;
