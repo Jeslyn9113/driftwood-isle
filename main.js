@@ -2611,6 +2611,32 @@ avoid.push({ x: LAYOUT.islandGarden.x, z: LAYOUT.islandGarden.z, r: 3.2 });
 avoid.push({ x: TOWN.x, z: TOWN.z + PLAZA_R + 3, r: 3.5 });
 const scenery = island.buildScenery({ scene, rr, rand: () => rand(), pick, mesh, mat, M, place, blocked, colliders, avoid, lampData, glowTex, makeAwning, makeBench, loop: LOOP, bridges });
 const { palms, trees, swayers, grassTufts, lighthouse, sailboats } = scenery;
+// the piano's glade: an 8 x 8 square round PIANO kept free of trees, bushes and props. Anything grown there is moved just
+// outside it (away from the plaza side, so nothing stands between the piano and the walking traffic), except the one
+// cherry tree behind the piano, which stays right beside it. Its trunk, shadow and collision move along with it.
+{
+  const inGlade = (x, z, pad = 0) => Math.abs(x - PIANO.x) < PIANO.clear + pad && Math.abs(z - PIANO.z) < PIANO.clear + pad;
+  const fx = Math.sin(PIANO.face), fz = Math.cos(PIANO.face); // toward the plaza
+  const front = (x, z) => (x - PIANO.x) * fx + (z - PIANO.z) * fz;
+  const keep = trees.filter((t) => inGlade(t.position.x, t.position.z) && Math.hypot(t.position.x - PIANO.x, t.position.z - PIANO.z) > 3.6)
+    .sort((a, b) => front(a.position.x, a.position.z) - front(b.position.x, b.position.z))[0]; // the one furthest behind
+  const crown = (c) => (trees.some((t) => Math.hypot(t.position.x - c.x, t.position.z - c.z) < 0.05) ? 1.1 : 0); // a tree's crown spreads past its trunk
+  const moving = colliders.filter((c) => !c.lvl && inGlade(c.x, c.z, c.r + crown(c)) && !(keep && Math.hypot(c.x - keep.position.x, c.z - keep.position.z) < 0.05));
+  const free = (x, z, r, cr) => !inGlade(x, z, r + cr + 0.3) && front(x, z) < 1 && H(x, z) > 0.3 && Math.hypot(x - LAYOUT.rental.x, z - LAYOUT.rental.z) > 3.4
+    && !pathSamples.some((p) => Math.hypot(p.x - x, p.z - z) < p.w + r + 0.5) && !colliders.some((o) => !moving.includes(o) && Math.hypot(o.x - x, o.z - z) < o.r + r + 0.5);
+  for (const c of moving) {
+    const cr = crown(c), objs = scene.children.filter((o) => Math.abs(o.position.x - c.x) < 0.06 && Math.abs(o.position.z - c.z) < 0.06);
+    let to = null;
+    for (let d = 0.5; d < 12 && !to; d += 0.25) for (let a = 0; a < TAU && !to; a += TAU / 32) {
+      const x = c.x + Math.sin(a) * d, z = c.z + Math.cos(a) * d;
+      if (free(x, z, c.r, cr)) to = { x, z };
+    }
+    if (!to) { for (const o of objs) scene.remove(o); colliders.splice(colliders.indexOf(c), 1); continue; } // nowhere nearby: gone
+    const dy = H(to.x, to.z) - H(c.x, c.z);
+    for (const o of objs) { o.position.x += to.x - c.x; o.position.z += to.z - c.z; o.position.y += dy; }
+    c.x = to.x; c.z = to.z; moving.splice(moving.indexOf(c), 1, { x: NaN, z: NaN }); // now an ordinary obstacle for the next one
+  }
+}
 // the beach's seats: every pair of loungers under a parasol (left and right lounger, reclining, facing the sea) and
 // the festival's two benches by the boardwalk, two spots each. Ids carry on after the restaurant's chairs (the
 // server counts them the same way).

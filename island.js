@@ -523,11 +523,11 @@ export function pondR(th) {
 export const POND_DOCK = { a: [-10.15, -24.65], b: [-12.45, -23.05], ya: 0.87, yb: 0.6, hw: 0.55 }; // the little dock: from the lawn (bank end) gently down over the water
 export const atPond = (x, z) => Number.isFinite(x) && Math.hypot(x - LAYOUT.pond.x, z - LAYOUT.pond.z) < LAYOUT.pond.r + 3.2; // fishing here gives pond catches
 
-// ---- the town piano: a little grand piano on a round rug on the open lawn east of the plaza (between the pet shop and
-// the Ferris wheel), its keyboard and bench toward the fountain. When nobody sits at it, it plays a loop of short
+// ---- the town piano: a little grand piano on a round rug in a cleared glade among the cherry blossoms beside Rex's
+// bicycle stand (main.js keeps an 8 x 8 square round it free of trees and props), its keyboard and bench toward the fountain. When nobody sits at it, it plays a loop of short
 // original pieces by itself, timed from the shared clock (auto0: when the loop last (re)started, set by the server),
 // so everyone nearby hears the same note at the same moment.
-export const PIANO = { x: 14, z: -11.9, face: Math.atan2(LAYOUT.plaza.x - 14, LAYOUT.plaza.z + 11.9), hear: 25, resumeMs: 10000, gapMs: 3500 };
+export const PIANO = { x: 13, z: 3, clear: 4, face: Math.atan2(LAYOUT.plaza.x - 13, LAYOUT.plaza.z - 3), hear: 25, resumeMs: 10000, gapMs: 3500 };
 // the pieces, composed for the island. mel: "degree:beats" (degree 0 = the key's tonic, counted along its scale; r = a
 // rest); prog: the chord under each bar (a scale degree); hand: how the left hand plays it
 const PIANO_SCORES = [
