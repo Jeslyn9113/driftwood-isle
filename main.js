@@ -1,6 +1,8 @@
 import * as THREE from 'three';
-import { createIsland, PALETTE, LAYOUT, loopPolyline, plotVisit, buildBoRoute, routeAt, riverPolyline, makePath, pathAt, bananaCourse, bananaRideAt, bananaRetAt, bananaReturnCtrl, VOLLEY, volleyEngine, volleyBallAt, volleyStart, volleyClamp, volleyHalfOf, volleyMatchPoint, pondR, POND_DOCK, atPond, PIANO, PIANO_DEMO, PIANO_LOW, PIANO_HIGH, pianoAutoNotes, pianoPiecesIn } from './island.js';
+import { createIsland, PALETTE, LAYOUT, loopPolyline, plotVisit, buildBoRoute, routeAt, riverPolyline, makePath, pathAt, bananaCourse, bananaRideAt, bananaRetAt, bananaReturnCtrl, VOLLEY, volleyEngine, volleyBallAt, volleyStart, volleyClamp, volleyHalfOf, volleyMatchPoint, pondR, POND_DOCK, atPond, MOVE, PIANO, PIANO_DEMO, PIANO_LOW, PIANO_HIGH, pianoAutoNotes, pianoPiecesIn } from './island.js';
 
+// walking and running: the speeds live in MOVE in island.js (walk 3.2, run 6.0 units a second; running from taps 8+
+// units away, full speed from 12), so the game and the server agree on them
 // ---------------------------------------------------------------- helpers
 function mulberry32(a) {
   return function () {
@@ -3144,8 +3146,8 @@ function makeCharacter(shirtColor) {
   scene.add(player);
   return { player, rig };
 }
-function animateRig(rig, dt, time, moving, phase, pickT) {
-  const swing = moving ? Math.sin(phase) * 0.7 : 0;
+function animateRig(rig, dt, time, moving, phase, pickT, run = 0) {
+  const swing = moving ? Math.sin(phase) * (0.7 + 0.35 * run) : 0;
   const k = Math.min(1, dt * 12);
   rig.legL.rotation.x = lerp(rig.legL.rotation.x, swing, k);
   rig.legR.rotation.x = lerp(rig.legR.rotation.x, -swing, k);
@@ -3154,14 +3156,14 @@ function animateRig(rig, dt, time, moving, phase, pickT) {
     rig.armL.rotation.x = rig.armR.rotation.x = -Math.sin(u * Math.PI) * 2.2;
     rig.body.rotation.x = Math.sin(u * Math.PI) * 0.35;
   } else {
-    rig.armL.rotation.x = lerp(rig.armL.rotation.x, -swing * 0.8, k);
-    rig.armR.rotation.x = lerp(rig.armR.rotation.x, swing * 0.8, k);
-    rig.body.rotation.x = lerp(rig.body.rotation.x, moving ? 0.08 : 0, Math.min(1, dt * 8));
+    rig.armL.rotation.x = lerp(rig.armL.rotation.x, -swing * (0.8 + 0.5 * run) - run * 0.25, k);
+    rig.armR.rotation.x = lerp(rig.armR.rotation.x, swing * (0.8 + 0.5 * run) - run * 0.25, k);
+    rig.body.rotation.x = lerp(rig.body.rotation.x, moving ? 0.08 + 0.17 * run : 0, Math.min(1, dt * 8));
   }
-  rig.armL.rotation.z = -0.15; rig.armR.rotation.z = 0.15;
-  rig.body.position.y = 0.55 + (moving ? Math.abs(Math.sin(phase)) * 0.06 : Math.sin(time * 2) * 0.012);
+  rig.armL.rotation.z = -0.15 - 0.12 * run; rig.armR.rotation.z = 0.15 + 0.12 * run;
+  rig.body.position.y = 0.55 + (moving ? Math.abs(Math.sin(phase)) * (0.06 + 0.07 * run) : Math.sin(time * 2) * 0.012);
   rig.head.rotation.y = moving ? 0 : Math.sin(time * 0.4) * 0.35;
-  rig.head.rotation.z = moving ? Math.sin(phase) * 0.05 : 0;
+  rig.head.rotation.z = moving ? Math.sin(phase) * 0.05 * (1 - 0.5 * run) : 0;
 }
 function nameTag(text, color) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64;
@@ -3960,7 +3962,13 @@ function updatePlayer(dt, time) {
     } else {
       moving = true;
       const swimSlow = swimming(player.position.x, player.position.z), inWater = wading(player.position.x, player.position.z) || swimSlow;
-      walk.speed = Math.min(swimSlow ? 1.5 : inWater ? 1.6 : volMine() !== null ? 5 : 3.2, walk.speed + dt * (volMine() !== null ? 16 : 10)); // slower through the water
+      // how fast: a walk for short taps, a run for far ones (blended in between), easing to a walk and a stop at the end.
+      // Only on open ground: in the water, on decks, stairs and jetties, and on the volleyball court it stays as it was.
+      const left = dist + (walk.route || []).reduce((a, q, i, arr) => a + Math.hypot(q.x - (i ? arr[i - 1].x : walk.target.x), q.z - (i ? arr[i - 1].z : walk.target.z)), 0);
+      const canRun = !inWater && myRoom === null && walk.deck == null && !(walk.route && walk.route.length) && volMine() === null;
+      walk.run = canRun ? smooth(MOVE.runFrom - 2, MOVE.runFull, left) : 0;
+      const wantV = swimSlow ? 1.5 : inWater ? 1.6 : volMine() !== null ? 5 : Math.min(lerp(MOVE.walk, MOVE.run, walk.run), MOVE.walk * 0.45 + left * 1.1);
+      walk.speed = walk.speed < wantV ? Math.min(wantV, walk.speed + dt * (volMine() !== null ? 16 : walk.speed < MOVE.walk ? 10 : MOVE.accel)) : Math.max(wantV, walk.speed - dt * MOVE.decel);
       if (inWater) { walk.rippleT = (walk.rippleT || 0) - dt; if (walk.rippleT <= 0) { walk.rippleT = 0.32; ripple(player.position.x, player.position.z, 0.35); } }
       const step = Math.min(wp ? sd : dist - stopAt * 0.5, walk.speed * dt);
       const nx = player.position.x + (sx / sd) * step, nz = player.position.z + (sz / sd) * step;
@@ -3984,15 +3992,16 @@ function updatePlayer(dt, time) {
       walk.heading += diff * Math.min(1, dt * 10);
     }
   }
-  if (!moving) walk.speed = 0;
+  if (!moving) { walk.speed = 0; walk.run = 0; }
+  walk.runNow = lerp(walk.runNow || 0, moving ? clamp((walk.speed - MOVE.walk) / (MOVE.run - MOVE.walk), 0, 1) : 0, Math.min(1, dt * 6)); // eased, for the pose and camera
   player.rotation.y = walk.heading;
   const gy = walk.deck != null ? deckY(DECKS[walk.deck], player.position.x, player.position.z) : groundY(player.position.x, player.position.z);
   player.position.y = lerp(player.position.y, gy, Math.min(1, dt * 15));
 
   // animation
-  if (moving) walk.phase += dt * 11;
+  if (moving) { const ph = walk.phase; walk.phase += dt * strideRate(walk.speed, walk.runNow); runDust(player.position, ph, walk.phase, walk.runNow, walk.deck != null); }
   if (walk.pickT > 0) walk.pickT -= dt;
-  animateRig(rig, dt, time, moving, walk.phase, walk.pickT);
+  animateRig(rig, dt, time, moving, walk.phase, walk.pickT, walk.runNow);
   if (walk.swing) updateSwing(dt);
   if (walk.netSwing) updateNetSwing(dt);
   if (walk.pour) updatePour(dt);
@@ -6123,6 +6132,39 @@ function updateFishing(dt, time) {
 const BITE_FISH_GEO = (() => { const g = new THREE.OctahedronGeometry(0.1, 0); g.scale(0.55, 0.45, 1.7); return g; })();
 // a small ring on the water where you wade
 function ripple(x, z, size) { splash({ x, z }, size); }
+// the stride: how fast the legs cycle for a speed, so the feet keep pace with the ground (a run takes longer strides)
+const STRIDE = 11 / 3.2; // leg-cycle radians per unit walked (the old walk: 11 a second at 3.2 units a second)
+const strideRate = (speed, run) => Math.max(4, speed * STRIDE / (1 + 0.32 * run));
+// tiny dust puffs at the feet while running (a small ripple instead when a foot lands in shallow water): a pool of
+// soft sprites, one per footfall (each time the stride passes a half turn)
+const dustPool = (() => {
+  const tex = radialTexture('rgba(246,232,206,0.95)', 'rgba(236,214,180,0)'), list = [];
+  for (let i = 0; i < 28; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0 }));
+    sp.visible = false; sp.scale.setScalar(0.2); scene.add(sp); list.push({ sp, t: 1, vx: 0, vz: 0 });
+  }
+  return list;
+})();
+let dustNext = 0;
+function runDust(pos, ph0, ph1, run, onDeck) {
+  if (run < 0.35 || myRoom !== null || Math.floor(ph0 / Math.PI) === Math.floor(ph1 / Math.PI)) return;
+  if (camera && Math.hypot(pos.x - camera.position.x, pos.z - camera.position.z) > 60) return; // too far away to see
+  if (!onDeck && H(pos.x, pos.z) < 0.05) { ripple(pos.x, pos.z, 0.3); return; }
+  for (let k = 0; k < 2; k++) {
+    const d = dustPool[dustNext]; dustNext = (dustNext + 1) % dustPool.length;
+    d.t = 0; d.vx = (Math.random() - 0.5) * 0.6; d.vz = (Math.random() - 0.5) * 0.6;
+    d.sp.position.set(pos.x + d.vx * 0.3, pos.y + 0.08, pos.z + d.vz * 0.3); d.sp.visible = true;
+  }
+}
+function updateDust(dt) {
+  for (const d of dustPool) {
+    if (!d.sp.visible) continue;
+    d.t += dt * 1.8;
+    if (d.t >= 1) { d.sp.visible = false; continue; }
+    d.sp.position.x += d.vx * dt; d.sp.position.z += d.vz * dt; d.sp.position.y += dt * 0.25;
+    d.sp.scale.setScalar(0.18 + d.t * 0.35); d.sp.material.opacity = 0.7 * (1 - d.t) * Math.min(1, d.t * 6) * (myRoom === null ? 1 : 0);
+  }
+}
 function splash(at, size) {
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.15, 0.24, 20), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false }));
   ring.rotation.x = -Math.PI / 2; ring.position.set(at.x, 0.13, at.z); scene.add(ring);
@@ -6531,7 +6573,7 @@ function updateCamera(dt) {
   orbit.yaw = ((orbit.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   updateCamOffset();
   // follow the character smoothly at exactly the chosen angle and distance (the orbit applies directly)
-  camLook.lerp(_v.copy(player.position).add(new THREE.Vector3(0, CAM_TARGET_Y, 0)), 1 - Math.exp(-dt * 3.5));
+  camLook.lerp(_v.copy(player.position).add(new THREE.Vector3(0, CAM_TARGET_Y, 0)), 1 - Math.exp(-dt * (3.5 + 2 * (walk.runNow || 0)))); // a little quicker while running
   camera.position.copy(camLook).addScaledVector(camOffset, zoom * (1 + balloonWide * 0.9));
   scene.fog.near = 150 + balloonWide * 260; scene.fog.far = 560 + balloonWide * 700;
   // the one rule kept: never below the ground or the sea surface
@@ -7504,7 +7546,7 @@ function bananaRushFx(dt, time) {
   const mine = myBananaSeat(), want = mine ? clamp(bananaPose(bananaBoats[mine.boat], nowMs()).v / BAN.speed, 0, 1) : 0;
   rushNow = lerp(rushNow, want, Math.min(1, dt * 2.5)); // eased so it never jumps
   if (speedFxEl) speedFxEl.style.opacity = rushNow > 0.02 ? (rushNow * 0.55).toFixed(3) : '0';
-  const fov = 40 + rushNow * 5;
+  const fov = 40 + rushNow * 5 + (myRoom === null ? (walk.runNow || 0) * 2.5 : 0); // and a touch wider while running
   if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   if (rushNow > 0.05) { camera.position.x += Math.sin(time * 23) * 0.018 * rushNow; camera.position.y += Math.sin(time * 31 + 1) * 0.014 * rushNow; }
 }
@@ -8527,7 +8569,7 @@ function addRemote(p) {
   c.player.position.set(p.x, groundY(p.x, p.z), p.z);
   c.player.rotation.y = p.h || 0;
   if (Number.isFinite(p.y)) c.player.position.y = p.y;
-  remotes.set(p.id, { ...c, name: p.name, ty: Number.isFinite(p.y) ? p.y : null, tx: p.x, tz: p.z, th: p.h || 0, m: p.m, phase: 0, pickT: 0, room: p.room || null });
+  remotes.set(p.id, { ...c, name: p.name, ty: Number.isFinite(p.y) ? p.y : null, tx: p.x, tz: p.z, th: p.h || 0, m: p.m, phase: 0, pickT: 0, room: p.room || null, color: p.color });
   refreshRemotes();
 }
 function removeRemote(id) {
@@ -8722,7 +8764,9 @@ function handleNet(m) {
     toast(`${m.p.name} arrived on the island`);
   } else if (m.t === 'move') {
     const r = remotes.get(m.id);
-    if (r) { r.tx = m.x; r.tz = m.z; r.th = m.h; r.m = m.m; r.ty = Number.isFinite(m.y) ? m.y : null; }
+    if (r) { r.tx = m.x; r.tz = m.z; r.th = m.h; r.m = m.m; r.run = m.r ? 1 : 0; r.ty = Number.isFinite(m.y) ? m.y : null; }
+  } else if (m.t === 'moveFix') { // the server didn't accept a jump that fast: back to where it last saw us
+    if (Number.isFinite(m.x) && Number.isFinite(m.z) && myRoom === null) { player.position.set(m.x, groundY(m.x, m.z), m.z); walk.target = null; walk.route = null; walk.speed = 0; }
   } else if (m.t === 'leave') {
     const r = remotes.get(m.id);
     if (r) { toast(`${r.name} headed home`); removeRemote(m.id); }
@@ -8778,6 +8822,7 @@ function updateNet(dt, time) {
     if (net.sendT <= 0) {
       net.sendT = 0.1;
       const msg = { t: 'move', x: +player.position.x.toFixed(2), z: +player.position.z.toFixed(2), h: +walk.heading.toFixed(2), m: walk.moving ? 1 : 0 };
+      if (walk.moving && (walk.runNow || 0) > 0.3) msg.r = 1; // running (the others show the run)
       if (walk.deck != null) msg.y = +deckY(DECKS[walk.deck], player.position.x, player.position.z).toFixed(2); // up on a balcony or bridge
       const key = `${msg.x},${msg.z},${msg.h},${msg.m},${msg.y}`;
       if (key !== net.last) { net.last = key; net.send(msg); }
@@ -8807,9 +8852,11 @@ function updateNet(dt, time) {
     const diff = ((r.th - r.player.rotation.y + Math.PI) % TAU + TAU) % TAU - Math.PI;
     r.player.rotation.y += diff * Math.min(1, dt * 10);
     const moving = !!r.m || d > 0.05;
-    if (moving) r.phase += dt * 11;
+    r.spd = lerp(r.spd || 0, moving ? Math.hypot(dx, dz) * k / Math.max(dt, 1e-3) : 0, Math.min(1, dt * 5)); // how fast they really go
+    r.runNow = lerp(r.runNow || 0, moving && r.run ? 1 : 0, Math.min(1, dt * 5));
+    if (moving) { const ph = r.phase; r.phase += dt * strideRate(Math.max(r.spd, r.run ? MOVE.run * 0.8 : MOVE.walk * 0.8), r.runNow); if (r.ty == null) runDust(p, ph, r.phase, r.runNow, false); }
     if (r.pickT > 0) r.pickT -= dt;
-    animateRig(r.rig, dt, time, moving, r.phase, r.pickT);
+    animateRig(r.rig, dt, time, moving, r.phase, r.pickT, r.runNow);
     if (r.ty == null && swimming(p.x, p.z)) swimPose(r.player, r.rig, time, moving); // swimming out in the sea
   }
 }
@@ -8879,6 +8926,250 @@ const beachLife = (() => {
 })();
 // ---------------------------------------------------------------- loop
 let last = performance.now(), elapsed = 0;
+// ---------------------------------------------------------------- the minimap
+// A small round map in the top-left corner (under the coins and log out) that turns with the camera, so "up" is the
+// way the camera looks (or stays north-up: the choice is in the full map and remembered on this device). Tapping it
+// opens the whole island with a legend. The ground is drawn once into a cached canvas from the world data (the
+// terrain's own colours and heights, the river, pond, paths, bridges and buildings), never by rendering the 3D scene;
+// the markers are drawn over it a few times a second. Hidden indoors; it keeps following you swimming or riding.
+const minimap = (() => {
+  const X0 = -100, Z0 = -86, WU = 200, DU = 172, PPU = 2; // the terrain's 200 x 172 plane, 2 pixels a unit
+  const VIEW = 70; // units across the round minimap
+  const root = document.getElementById('minimap'), cv = document.getElementById('minimapCanvas');
+  const panel = document.getElementById('mapPanel'), bigCv = document.getElementById('mapCanvas'), tip = document.getElementById('mapTip');
+  const upBtn = document.getElementById('mapNorthUp'), legendEl = document.getElementById('mapLegend');
+  let northUp = false;
+  try { northUp = localStorage.getItem('driftwood.mapNorthUp') === '1'; } catch { /* private mode: camera-up */ }
+  // the places: one cute icon each (the plots, players and Bo are drawn separately, as they change)
+  const ray = (p) => ({ x: p.root.x + p.dir.x * p.len, z: p.root.z + p.dir.z * p.len });
+  const B = LAYOUT.beach, pierEnd = { x: dockEnd.x, z: dockEnd.y }, beachPierEnd = ray(B.pier);
+  const SHOP_ICON = { clothes: ['👗', 'Clothes shop'], seed: ['🌱', 'Seed shop'], furniture: ['🛋️', 'Furniture shop'], pet: ['🐾', 'Pet shop'] };
+  const places = [
+    { x: TOWN.x, z: TOWN.z, icon: '⛲', name: 'Town plaza' },
+    ...SHOPS.map((s) => ({ x: s.x, z: s.z, icon: SHOP_ICON[s.kind][0], name: SHOP_ICON[s.kind][1] })),
+    { x: LAYOUT.rental.x, z: LAYOUT.rental.z, icon: '🚲', name: "Rex's bicycle stand" },
+    { x: PIANO.x, z: PIANO.z, icon: '🎹', name: 'Town piano' },
+    { x: LAYOUT.rides.ferris.x, z: LAYOUT.rides.ferris.z, icon: '🎡', name: 'Ferris wheel' },
+    { x: LAYOUT.rides.carousel.x, z: LAYOUT.rides.carousel.z, icon: '🎠', name: 'Merry-go-round' },
+    { x: LAYOUT.balloon.x, z: LAYOUT.balloon.z, icon: '🎈', name: 'Hot air balloon park' },
+    { x: B.restaurant.x, z: B.restaurant.z, icon: '🍤', name: "Mei's Seaside restaurant" },
+    { x: VOLLEY.x, z: VOLLEY.z, icon: '🏐', name: 'Volleyball court' },
+    { x: B.banana.jetty[0][0], z: B.banana.jetty[0][1], icon: '🍌', name: 'Banana boat dock' },
+    { x: LAYOUT.pond.x, z: LAYOUT.pond.z, icon: '🪷', name: 'Pond' },
+    { x: POND_DOCK.b[0], z: POND_DOCK.b[1], icon: '🎣', name: 'Fishing spot: pond dock', fish: true },
+    { x: pierEnd.x, z: pierEnd.z, icon: '🎣', name: 'Fishing spot: town pier', fish: true },
+    { x: beachPierEnd.x, z: beachPierEnd.z, icon: '🎣', name: 'Fishing spot: beach pier', fish: true },
+  ];
+  const LEGEND = [['⛲', 'Town plaza'], ['👗', 'Clothes shop'], ['🌱', 'Seed shop'], ['🛋️', 'Furniture shop'], ['🐾', 'Pet shop'], ['1', 'Home plot'], ['🏠', 'Claimed home'],
+    ['★', 'Your home (gold)'], ['🚲', 'Bicycle stand'], ['🎹', 'Piano'], ['🎡', 'Ferris wheel'], ['🎠', 'Merry-go-round'], ['🎈', 'Balloon park'], ['🍤', 'Restaurant'],
+    ['🏐', 'Volleyball'], ['🍌', 'Banana boats'], ['🪷', 'Pond'], ['🎣', 'Fishing spot'], ['🎒', 'Bo the trader'], ['●', 'Other players'], ['▲', 'You']];
+
+  // ---- the base map, drawn once (and again only if the world's layout changes: minimap.refresh())
+  const base = document.createElement('canvas'); base.width = WU * PPU; base.height = DU * PPU;
+  const toSrgb = (v) => Math.round(255 * Math.min(1, Math.pow(Math.max(0, v), 1 / 2.2)));
+  function drawBase() {
+    const ctx = base.getContext('2d'), w = base.width, h = base.height;
+    const img = ctx.createImageData(w, h), d = img && img.data;
+    if (d) {
+      for (let i = 0; i < d.length; i += 4) { d[i] = 150; d[i + 1] = 212; d[i + 2] = 232; d[i + 3] = 255; } // the open sea
+      const pos = terrain.geometry.attributes.position, col = terrain.geometry.attributes.color, ox = terrain.position.x, oz = terrain.position.z;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i) + ox, z = pos.getZ(i) + oz, y = pos.getY(i);
+        const px = Math.floor((x - X0) * PPU), pz = Math.floor((z - Z0) * PPU);
+        if (px < 0 || pz < 0 || px >= w || pz >= h) continue;
+        let r, g, b;
+        if (y < -0.02) { const k = Math.min(1, -y / 1.6); r = 196 - 46 * k; g = 236 - 24 * k; b = 240 - 8 * k; } // shallow to deep, pastel
+        else if (col) { r = toSrgb(col.getX(i)); g = toSrgb(col.getY(i)); b = toSrgb(col.getZ(i)); r += (255 - r) * 0.22; g += (255 - g) * 0.22; b += (255 - b) * 0.22; }
+        else { r = 170; g = 220; b = 140; }
+        for (let a = 0; a < 2; a++) for (let c = 0; c < 2; c++) {
+          if (px + a >= w || pz + c >= h) continue;
+          const k = ((pz + c) * w + px + a) * 4; d[k] = r; d[k + 1] = g; d[k + 2] = b;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+    ctx.save(); ctx.scale(PPU, PPU); ctx.translate(-X0, -Z0); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const line = (pts, width, color) => { ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.z) : ctx.moveTo(p.x, p.z))); ctx.stroke(); };
+    const disc = (x, z, r, color, edge) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, z, r, 0, TAU); ctx.fill(); if (edge) { ctx.strokeStyle = edge; ctx.lineWidth = 0.4; ctx.stroke(); } };
+    const box = (x, z, w2, d2, yaw, color, edge) => {
+      ctx.save(); ctx.translate(x, z); ctx.rotate(-yaw); ctx.fillStyle = color; ctx.fillRect(-w2, -d2, w2 * 2, d2 * 2);
+      if (edge) { ctx.strokeStyle = edge; ctx.lineWidth = 0.45; ctx.strokeRect(-w2, -d2, w2 * 2, d2 * 2); }
+      ctx.restore();
+    };
+    // the river and the pond
+    line(RIVER_PTS, LAYOUT.river.half * 2, '#a9dcec');
+    ctx.fillStyle = '#a9dcec'; ctx.beginPath();
+    for (let k = 0; k <= 40; k++) { const th = (k / 40) * TAU, r = pondR(th); ctx.lineTo(LAYOUT.pond.x + Math.cos(th) * r, LAYOUT.pond.z + Math.sin(th) * r); }
+    ctx.fill();
+    disc(LAYOUT.desert.oasis.x, LAYOUT.desert.oasis.z, LAYOUT.desert.oasis.r, '#a9dcec');
+    // home yards (lawn inside a hedge), then the paths and roads over everything, the plaza and the bridges
+    for (const p of PLOTS) box(p.x, p.z, PLOT_HALF, PLOT_HALF, p.face, '#d6efbc', '#8cc47a');
+    for (const [a, b, w, boards] of pathSegs) line([a, b], Math.max(0.9, w * 2), boards ? '#d9b78e' : '#f4e8cf');
+    disc(TOWN.x, TOWN.z, PLAZA_R, '#efe3c9', '#dccaa6');
+    for (const b of bridges) { ctx.save(); ctx.translate(b.x, b.z); ctx.rotate(-Math.atan2(b.ux, b.uz)); ctx.fillStyle = '#c99a6a'; ctx.fillRect(-b.half, -b.len / 2, b.half * 2, b.len); ctx.restore(); }
+    line([{ x: dockStart.x, z: dockStart.y }, pierEnd], 1.6, '#c99a6a');
+    line([B.pier.root, beachPierEnd], 1.6, '#c99a6a');
+    line(B.banana.jetty.map(([x, z]) => ({ x, z })), 1.4, '#c99a6a');
+    line(B.boardwalk.map(([x, z]) => ({ x, z })), 2.2, '#d9b78e');
+    // buildings and rides as small simple shapes
+    const faceTo = (x, z) => Math.atan2(TOWN.x - x, TOWN.z - z);
+    for (const s of SHOPS) box(s.x, s.z, 1.9, 1.7, faceTo(s.x, s.z), s.roof, '#ffffff');
+    for (const dc of LAYOUT.decor) box(dc.x, dc.z, 1.5, 1.5, 0, dc.kind === 'tower' ? '#c8a88a' : '#e8b4a0', '#ffffff');
+    disc(LAYOUT.rides.ferris.x, LAYOUT.rides.ferris.z, LAYOUT.rides.ferris.pad, '#f1e0f0', '#d7a8d0');
+    disc(LAYOUT.rides.carousel.x, LAYOUT.rides.carousel.z, LAYOUT.rides.carousel.pad, '#fde6c8', '#e8b67a');
+    disc(LAYOUT.balloon.x, LAYOUT.balloon.z, 6, 'rgba(255,255,255,0.28)');
+    box(LAYOUT.rental.x, LAYOUT.rental.z, 1.1, 0.8, LAYOUT.rental.face, '#8cc2f0', '#ffffff');
+    disc(PIANO.x, PIANO.z, 2.05, '#f7c3d3', '#e98fae');
+    box(B.restaurant.x, B.restaurant.z, 3.2, 2.4, B.restaurant.face, '#e9a982', '#ffffff');
+    box(VOLLEY.x, VOLLEY.z, VOLLEY.hw, VOLLEY.hl, 0, '#fbeccb', '#e6b98a'); line([{ x: VOLLEY.x - VOLLEY.hw, z: VOLLEY.z }, { x: VOLLEY.x + VOLLEY.hw, z: VOLLEY.z }], 0.3, '#ffffff');
+    box(B.hut.x, B.hut.z, 1.2, 1.0, B.hut.face, '#f2b8a0', '#ffffff');
+    for (const hut of LAYOUT.desert.huts) box(hut.x, hut.z, 1.3, 1.3, hut.face, '#e7b98a', '#ffffff');
+    disc(LAYOUT.desert.volcano.x, LAYOUT.desert.volcano.z, LAYOUT.desert.volcano.r, '#d6a08a', '#f29ab8');
+    disc(LAYOUT.desert.volcano.x, LAYOUT.desert.volcano.z, 1.4, '#f6b8d0');
+    disc(LAYOUT.lighthouse.x, LAYOUT.lighthouse.z, 1.2, '#ffffff', '#e2735a');
+    ctx.restore();
+  }
+  drawBase();
+
+  // ---- the markers over it: world (x, z) to the map's pixels, for a map centred on (cx, cz), s pixels a unit, turned by rot
+  const toScreen = (x, z, cx, cz, s, rot, w, h) => {
+    const dx = (x - cx) * s, dz = (z - cz) * s, c = Math.cos(rot), sn = Math.sin(rot);
+    return { x: w / 2 + dx * c - dz * sn, y: h / 2 + dx * sn + dz * c };
+  };
+  const icon = (ctx, ch, x, y, size) => { ctx.font = `${Math.round(size)}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ch, x, y); };
+  const badge = (ctx, x, y, r, fill, edge) => { ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); if (edge) { ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1.5, r * 0.28); ctx.stroke(); } };
+  const text = (ctx, t, x, y, px, color) => { ctx.fillStyle = color; ctx.font = `bold ${Math.round(px)}px "Trebuchet MS",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, x, y); };
+  const hits = []; // what's on the full map, for taps: { x, y, name }
+  function drawMap(ctx, w, h, cx, cz, s, rot, full) {
+    ctx.save(); ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#96d4e8'; ctx.fillRect(0, 0, w, h);
+    ctx.translate(w / 2, h / 2); ctx.rotate(rot); ctx.scale(s, s); ctx.translate(-cx, -cz);
+    ctx.imageSmoothingEnabled = true; ctx.drawImage(base, X0, Z0, WU, DU);
+    ctx.restore();
+    // the time of day: a soft wash of the sky's colour (warm at dusk, deep blue at night)
+    const night = cur.night || 0;
+    if (night > 0.02) { ctx.fillStyle = `rgba(42, 52, 120, ${0.34 * night})`; ctx.fillRect(0, 0, w, h); }
+    if (cur.name === 'Dusk') { ctx.fillStyle = 'rgba(255, 150, 110, 0.16)'; ctx.fillRect(0, 0, w, h); }
+    if (full) hits.length = 0;
+    const at = (x, z) => toScreen(x, z, cx, cz, s, rot, w, h);
+    const inside = (p, pad) => (full ? p.x > -pad && p.y > -pad && p.x < w + pad && p.y < h + pad : Math.hypot(p.x - w / 2, p.y - h / 2) < w / 2 - pad);
+    const sz = full ? Math.max(16, Math.min(24, w / 30)) : Math.max(11, w / 10.5);
+    // the home plots: numbered badges, a little house on the claimed ones, a gold ring round your own
+    for (const sl of plotSlots) {
+      const pl = PLOTS[sl.n - 1] || sl, p = at(pl.x, pl.z); if (!inside(p, 4)) continue;
+      const mine = !!sl.owner && sl.owner === net.myName, r = sz * 0.5;
+      badge(ctx, p.x, p.y, r, mine ? '#ffe28a' : '#fffaf0', mine ? '#e0a020' : '#8c6a48');
+      if (sl.owner) { icon(ctx, '🏠', p.x, p.y, sz * 0.7); text(ctx, String(sl.n), p.x + r * 0.95, p.y - r * 0.8, r * 0.85, '#5a4632'); }
+      else text(ctx, String(sl.n), p.x, p.y + 0.5, r * 1.15, '#5a4632');
+      if (full) hits.push({ x: p.x, y: p.y, name: `Home plot ${sl.n}${sl.owner ? (mine ? ' (your home)' : ` (${sl.owner}'s home)`) : ' (free)'}` });
+    }
+    for (const pl of places) {
+      if (!full && pl.fish) continue; // the full map shows the fishing spots; the minimap keeps it simple
+      const p = at(pl.x, pl.z); if (!inside(p, 4)) continue;
+      badge(ctx, p.x, p.y, sz * 0.52, 'rgba(255,250,240,0.82)');
+      icon(ctx, pl.icon, p.x, p.y + 0.5, sz * 0.72);
+      if (full) hits.push({ x: p.x, y: p.y, name: pl.name });
+    }
+    // Bo, wandering round the homes
+    {
+      const p = at(bo.g.position.x, bo.g.position.z);
+      if (inside(p, 4)) {
+        badge(ctx, p.x, p.y, sz * 0.32, '#f2c94c', '#ffffff');
+        if (full) { icon(ctx, '🎒', p.x, p.y - sz * 0.6, sz * 0.6); hits.push({ x: p.x, y: p.y, name: 'Bo the wandering trader' }); }
+      }
+    }
+    // the other players
+    for (const r of remotes.values()) {
+      if (r.room) continue;
+      const p = at(r.player.position.x, r.player.position.z); if (!inside(p, 3)) continue;
+      badge(ctx, p.x, p.y, sz * 0.28, r.color || '#ff8fb8', '#ffffff');
+      if (full) hits.push({ x: p.x, y: p.y, name: r.name || 'A player' });
+    }
+    // you: a bright arrow the way your character faces (glowing a little at night)
+    {
+      const p = at(player.position.x, player.position.z), hd = player.rotation.y, fx = Math.sin(hd), fz = Math.cos(hd);
+      const ang = Math.atan2(fx * Math.sin(rot) + fz * Math.cos(rot), fx * Math.cos(rot) - fz * Math.sin(rot)), L = sz * 0.62;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(ang);
+      if (night > 0.3) { ctx.shadowColor = 'rgba(255, 230, 140, 0.95)'; ctx.shadowBlur = 8; }
+      ctx.fillStyle = '#ff5a8a'; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(L, 0); ctx.lineTo(-L * 0.7, L * 0.62); ctx.lineTo(-L * 0.35, 0); ctx.lineTo(-L * 0.7, -L * 0.62); ctx.closePath(); ctx.stroke(); ctx.fill();
+      ctx.restore();
+      if (full) hits.push({ x: p.x, y: p.y, name: 'You are here' });
+    }
+    // the compass: a little N on the rim where north (-z) is
+    if (!full) {
+      const R = w / 2 - sz * 0.62, x = w / 2 + Math.sin(rot) * R, y = h / 2 - Math.cos(rot) * R;
+      badge(ctx, x, y, sz * 0.5, '#e2735a', '#fffaf0');
+      text(ctx, 'N', x, y + 0.5, sz * 0.6, '#fffaf0');
+    }
+  }
+
+  // ---- the minimap in the corner: a tap opens the full map; drags and taps never reach the world under it
+  let dpr = 1, wait = 0, open = false, bigWait = 0, bigFit = null;
+  function fit() {
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    const size = cv.clientWidth || 120;
+    cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
+    wait = 0; if (open) bigLayout();
+  }
+  window.addEventListener('resize', fit);
+  const camRot = () => (northUp ? 0 : orbit.yaw); // camera-up: the way the camera looks points up the map
+  const swallow = (e) => { e.stopPropagation(); if (e.cancelable) e.preventDefault(); };
+  for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'wheel', 'contextmenu']) root.addEventListener(t, swallow, { passive: false });
+  root.addEventListener('click', (e) => { swallow(e); openMap(); });
+
+  // ---- the full map: the whole island north-up, the same markers, a legend, the north-up switch and a close button
+  function bigLayout() {
+    const W = Math.round(bigCv.clientWidth || 600), Hh = Math.round(bigCv.clientHeight || 480);
+    bigCv.width = Math.round(W * dpr); bigCv.height = Math.round(Hh * dpr);
+    const minX = -86, maxX = 74, minZ = -58, maxZ = 50; // the land, its piers and the banana jetty
+    bigFit = { W, H: Hh, s: Math.min(W / (maxX - minX), Hh / (maxZ - minZ)), cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2 };
+  }
+  function openMap() {
+    if (open || myRoom !== null) return;
+    open = true; panel.classList.add('open'); tip.classList.remove('show');
+    bigLayout(); bigWait = 0;
+  }
+  function closeMap() { open = false; panel.classList.remove('open'); tip.classList.remove('show'); }
+  document.getElementById('mapClose').addEventListener('click', closeMap);
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) closeMap(); });
+  const syncUp = () => { upBtn.classList.toggle('on', northUp); upBtn.setAttribute('aria-pressed', String(northUp)); upBtn.textContent = northUp ? '🧭 Minimap: north up' : '🧭 Minimap: turns with camera'; };
+  syncUp();
+  upBtn.addEventListener('click', () => {
+    northUp = !northUp; syncUp(); wait = 0;
+    try { localStorage.setItem('driftwood.mapNorthUp', northUp ? '1' : '0'); } catch { /* not remembered this time */ }
+  });
+  legendEl.innerHTML = LEGEND.map(([ic, name]) => `<span class="lg"><b class="${/^[0-9★●▲]$/.test(ic) ? 'sym' : ''}">${ic}</b>${name}</span>`).join('');
+  bigCv.addEventListener('click', (e) => { // tap a place, a plot, a player or Bo: its name
+    if (!bigFit) return;
+    const rc = bigCv.getBoundingClientRect ? bigCv.getBoundingClientRect() : { left: 0, top: 0 };
+    const x = e.clientX - rc.left, y = e.clientY - rc.top;
+    let best = null, bd = 22;
+    for (const ht of hits) { const d = Math.hypot(ht.x - x, ht.y - y); if (d < bd) { bd = d; best = ht; } }
+    if (!best) { tip.classList.remove('show'); return; }
+    tip.textContent = best.name; tip.style.left = `${best.x}px`; tip.style.top = `${best.y}px`; tip.classList.add('show');
+  });
+  for (const t of ['pointerdown', 'wheel']) panel.addEventListener(t, (e) => e.stopPropagation());
+
+  function update(dt) {
+    const hide = myRoom !== null;
+    root.classList.toggle('hidden', hide);
+    if (hide && open) closeMap();
+    root.classList.toggle('night', (cur.night || 0) > 0.5);
+    if (!cv.width) fit();
+    if (!hide && (wait -= dt) <= 0) {
+      wait = 1 / 15;
+      const w = cv.width, h = cv.height;
+      drawMap(cv.getContext('2d'), w, h, player.position.x, player.position.z, w / VIEW, camRot(), false);
+    }
+    if (open && bigFit && (bigWait -= dt) <= 0) {
+      bigWait = 1 / 8;
+      const ctx = bigCv.getContext('2d');
+      ctx.save(); ctx.scale(dpr, dpr); drawMap(ctx, bigFit.W, bigFit.H, bigFit.cx, bigFit.cz, bigFit.s, 0, true); ctx.restore();
+    }
+  }
+  return { update, refresh: () => { drawBase(); wait = 0; }, openMap, closeMap, get open() { return open; }, get northUp() { return northUp; }, places, hits };
+})();
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
@@ -8915,6 +9206,7 @@ function frame(now) {
   scenery.updateDesert(nowMs() / 1000, cur.lamp);
   updateSailboats(dt);
   for (let i = transients.length - 1; i >= 0; i--) if (!transients[i](dt, elapsed)) transients.splice(i, 1);
+  updateDust(dt);
 
   nextEvent -= dt;
   if (nextEvent <= 0) { triggerEvent(); nextEvent = rr(5, 9); }
@@ -8922,6 +9214,7 @@ function frame(now) {
 
   updateCamera(dt);
   updateParasolFade(dt);
+  minimap.update(dt); // the round map in the corner (and the full map while it's open), after the camera turned
   updateVolley(dt, elapsed); // after the players and the camera: jumps, the ball, the floating buttons
   updatePiano(dt, elapsed); // the piano's music, keys, hearts, lights, its Play circle and the pianist's name
   updateSeatBubbles(); // after the camera moved, so the circles sit exactly over their seats

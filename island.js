@@ -82,6 +82,10 @@ export const PALETTE = {
 const HALF_PI = Math.PI / 2;
 // The island's land is the painting's island scaled up 1.7x about (0, -4) (about 3x the area); the town (plaza,
 // shops, cafe, clock tower) keeps its traced size and place, and the 8 homes are spread out over the new land.
+// ---- walking and running speeds (units a second), shared by the game and the server. A tap closer than runFrom is a
+// walk; from runFrom on the character runs, blending up to the full run by runFull (and back down near the end).
+// cap: the fastest the server lets anyone move on foot (or on a bicycle) between two position updates.
+export const MOVE = { walk: 3.2, run: 6.0, runFrom: 8, runFull: 12, accel: 6, decel: 9, cap: 7.5, slack: 2.5 };
 export const ISLAND_SCALE = 1.7;
 const grow = ([x, z]) => [x * ISLAND_SCALE, (z + 4) * ISLAND_SCALE - 4];
 const TOWN_CENTRE = { x: 2, z: -10 }; // the middle of the town (plaza, shops and their back row)

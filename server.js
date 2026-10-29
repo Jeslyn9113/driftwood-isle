@@ -274,7 +274,7 @@ const PLOT_COUNT = 8;
 // the island's layout (plots, roads, Bo's walk) comes from island.js, the same file the game uses
 // ---- the town piano: who sits at it (one player at a time), when its auto-play loop (re)starts (everyone plays the
 // same piece from the shared clock), and the notes of whoever plays it relayed to everyone else. Nothing is saved.
-const { PIANO } = require('./island.js');
+const { PIANO, MOVE } = require('./island.js');
 const piano = { who: null, name: '', auto0: Date.now() };
 const pianoMsg = () => ({ t: 'piano', who: piano.who, name: piano.name, auto0: piano.auto0 });
 function pianoFree(id) { // the bench is free again; the piano starts playing by itself after a little while
@@ -283,6 +283,10 @@ function pianoFree(id) { // the bench is free again; the piano starts playing by
   return true;
 }
 const nearPiano = (p) => Number.isFinite(p.x) && !p.room && Math.hypot(p.x - PIANO.x, p.z - PIANO.z) < 4.5;
+// moving: what sets you somewhere new (the move check gives a few seconds' grace after these) and who moves freely now
+const MOVE_FREE_MSGS = new Set(['resume', 'register', 'enter', 'exit', 'ride', 'rideOff', 'bikeMount', 'bikeDismount', 'bananaBoard', 'bananaOff', 'balloonBoard', 'balloonOff', 'volleyJoin', 'volleyPractice', 'volleyAgain', 'volleyLeave', 'pianoSit', 'pianoStand', 'sit', 'stand']);
+const moveFree = (p) => piano.who === p.id || (bikes.get(p.id) || {}).riding || balloonSpot(p.id) >= 0 || !!bananaSeatOf(p.id) || volley.sideOf(p.id) >= 0
+  || [...seats.values()].includes(p.id) || Object.values(rideOcc).some((m) => [...m.values()].some((o) => o.id === p.id));
 const PIANO_NOTES_PER_S = 16, PIANO_BURST = 24; // the most notes anyone can send: 16 a second, short bursts of 24
 
 const { LAYOUT, buildBoRoute, routeAt } = require('./island.js');
@@ -517,7 +521,7 @@ wss.on('connection', (ws) => {
       id: nextId++, key, name: acc.name, color: acc.color,
       x: samePlace && Number.isFinite(prog.x) ? prog.x : null, z: samePlace && Number.isFinite(prog.z) ? prog.z : null, h: Number.isFinite(prog.h) ? prog.h : 0, m: 0,
       pocket: cleanPocket(prog.pocket), energy: Number.isFinite(prog.energy) ? Math.max(0, Math.min(100, prog.energy)) : 100,
-      tool: TOOLS.has(prog.tool) ? prog.tool : null, announced: false, room: null,
+      tool: TOOLS.has(prog.tool) ? prog.tool : null, announced: false, room: null, freeAt: Date.now() + 8000,
       coins: Number.isInteger(acc.coins) && acc.coins >= 0 ? acc.coins : START_COINS, // kept on the account, outside progress
     };
     if (acc.coins !== p.coins) { acc.coins = p.coins; accountsDirty = true; }
@@ -551,6 +555,7 @@ wss.on('connection', (ws) => {
       try { await authenticate(msg); } catch { send(ws, { t: 'authError', msg: 'Something went wrong, please try again.' }); } finally { busy = false; }
       return;
     }
+    if (MOVE_FREE_MSGS.has(msg.t)) p.freeAt = Date.now() + (msg.t === 'ride' ? 40000 : 0); // these place you somewhere new (a ride: until it ends)
     if (piano.who === p.id && ['sit', 'ride', 'bikeMount', 'balloonBoard', 'bananaBoard', 'volleyJoin'].includes(msg.t)) return; // at the piano: stand up first
     if (msg.t === 'logout') {
       if (typeof msg.token === 'string') delete accounts.sessions[sha256(msg.token)];
@@ -841,11 +846,21 @@ wss.on('connection', (ws) => {
     } else if (msg.t === 'move') {
       const x = Number(msg.x), z = Number(msg.z), h = Number(msg.h);
       if (!Number.isFinite(x) || !Number.isFinite(z) || Math.abs(x) > 150 || Math.abs(z) > 90) return;
+      // no faster than a run (or a bicycle): a jump further than that is refused and the mover put back. Free while
+      // indoors, on a seat, a ride, a bicycle, the balloon, a banana boat, the court or the piano, for a few seconds after
+      // any of those ends, and just after joining or going in or out of a house (those place you somewhere new)
+      const now = Date.now();
+      if (p.room || moveFree(p)) p.freeAt = now;
+      else if (p.announced && Number.isFinite(p.x) && now - (p.freeAt || 0) > 6000) {
+        const secs = Math.min(1, Math.max(0.1, (now - (p.moveAt || now)) / 1000));
+        if (Math.hypot(x - p.x, z - p.z) > MOVE.cap * secs + MOVE.slack) return send(ws, { t: 'moveFix', x: p.x, z: p.z });
+      }
+      p.moveAt = now;
       const first = !p.announced;
       p.announced = true;
       p.x = x; p.z = z; p.h = Number.isFinite(h) ? h : 0; p.m = msg.m ? 1 : 0;
       const y = Number(msg.y); p.y = Number.isFinite(y) && y > -1 && y < 12 ? y : null; // up on a beach cabin's balcony or bridge
-      broadcast(first ? { t: 'join', p: pub(p) } : { t: 'move', id: p.id, x, z, h: p.h, m: p.m, y: p.y }, ws);
+      broadcast(first ? { t: 'join', p: pub(p) } : { t: 'move', id: p.id, x, z, h: p.h, m: p.m, r: msg.r === 1 && p.m ? 1 : 0, y: p.y }, ws);
       if (piano.who === p.id && !nearPiano(p) && pianoFree(p.id)) broadcast(pianoMsg()); // walked off without standing up
     } else if (msg.t === 'pick') {
       const id = Number(msg.item);
