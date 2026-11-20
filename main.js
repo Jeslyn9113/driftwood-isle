@@ -616,8 +616,8 @@ function makeBalloonGirl() {
   body.add(mesh(new THREE.CylinderGeometry(0.17, 0.2, 0.3, 12), dress, 0, 0.42, 0));
   const sash = mesh(new THREE.TorusGeometry(0.19, 0.03, 6, 16), dressDark, 0, 0.3, 0); sash.rotation.x = Math.PI / 2; body.add(sash);
   for (const x of [-0.11, 0.11]) {
-    g.add(mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.38, 6), skin, x, 0.2, 0));
-    g.add(mesh(new THREE.BoxGeometry(0.11, 0.07, 0.17), mat('#e27f6a', { flatShading: false }), x, 0.03, 0.03));
+    g.add(mesh(new THREE.CapsuleGeometry(0.07, 0.24, 4, 10), skin, x, 0.22, 0));
+    const shoe = mesh(new THREE.SphereGeometry(0.09, 14, 10), mat('#e27f6a', { flatShading: false }), x, 0.05, 0.03); shoe.scale.set(0.95, 0.6, 1.35); g.add(shoe);
   }
   const head = new THREE.Group(); head.position.y = 0.95; body.add(head);
   head.add(mesh(new THREE.SphereGeometry(0.3, 18, 14), skin));
@@ -626,14 +626,19 @@ function makeBalloonGirl() {
   const tail = new THREE.Group(); tail.position.set(0, 0.18, -0.28); head.add(tail);
   tail.add(mesh(new THREE.SphereGeometry(0.06, 8, 6), mat('#f25c7a', { flatShading: false }))); // scrunchie
   const pony = mesh(new THREE.ConeGeometry(0.11, 0.42, 10), hair, 0, -0.2, -0.06); pony.rotation.x = Math.PI - 0.35; tail.add(pony);
+  const shine = new THREE.MeshBasicMaterial({ color: 0xffffff });
   for (const x of [-0.1, 0.1]) {
-    head.add(mesh(new THREE.SphereGeometry(0.037, 8, 6), mat('#2b211c', { flatShading: false }), x, -0.02, 0.27));
-    const blush = mesh(new THREE.SphereGeometry(0.042, 8, 6), mat('#ffb1a0', { flatShading: false }), x * 1.6, -0.09, 0.24); blush.scale.z = 0.3; head.add(blush);
+    const eye = mesh(new THREE.SphereGeometry(0.046, 12, 10), mat('#3a2a24', { flatShading: false }), x, -0.02, 0.26); eye.scale.set(0.85, 1.25, 0.5); head.add(eye);
+    const glint = new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 6), shine); glint.position.set(x + 0.014, 0.01, 0.284); head.add(glint);
+    const ear = mesh(new THREE.SphereGeometry(0.065, 10, 8), skin, x * 2.95, -0.03, 0); ear.scale.set(0.5, 1, 0.8); head.add(ear);
+    const blush = mesh(new THREE.SphereGeometry(0.044, 10, 8), mat('#ffb1a0', { flatShading: false }), x * 1.7, -0.09, 0.235); blush.scale.set(1.2, 0.8, 0.3); head.add(blush);
   }
+  const smile = mesh(new THREE.TorusGeometry(0.032, 0.01, 6, 12, Math.PI), mat('#c0604f', { flatShading: false }), 0, -0.1, 0.28); smile.rotation.z = Math.PI; head.add(smile);
   const arms = {};
   for (const side of [-1, 1]) {
     const arm = new THREE.Group(); arm.position.set(side * 0.21, 0.52, 0); body.add(arm);
-    arm.add(mesh(new THREE.CapsuleGeometry(0.05, 0.22, 3, 6), skin, 0, -0.15, 0));
+    arm.add(mesh(new THREE.CapsuleGeometry(0.064, 0.18, 4, 10), skin, 0, -0.14, 0));
+    arm.add(mesh(new THREE.SphereGeometry(0.072, 12, 10), skin, 0, -0.28, 0.01));
     arms[side < 0 ? 'left' : 'right'] = arm;
   }
   // balloons on strings from the left hand, gathered in one bunch that sways
@@ -999,37 +1004,65 @@ function turnRides(time) {
 // ---------------------------------------------------------------- shopkeepers: one NPC in front of each shop
 // A shared base body (same proportions as the players), dressed differently per shop, plus their little props.
 // Nothing here uses the world's random numbers, so the island layout stays exactly as it was.
-function makeTownNpc(o) {
-  const g = new THREE.Group();
+// ---- the shared soft, rounded body for the player, other players and every townsperson
+// (same pivots and size as before, so animations, hats, held tools and seats all still line up)
+// o: { skin, hair, top, bottom, shoes, legs (shin colour, defaults to bottom), longHair }
+function buildChibi(root, o) {
   const soft = (c) => mat(c, { flatShading: false });
-  const skin = soft(o.skin), hair = soft(o.hair), top = soft(o.top), bottom = soft(o.bottom), shoe = soft(o.shoes || '#7a4e34');
-  const body = new THREE.Group(); body.position.y = 0.55; g.add(body);
-  body.add(mesh(new THREE.CapsuleGeometry(0.22, 0.25, 4, 10), top, 0, 0.2, 0));
-  body.add(mesh(new THREE.CylinderGeometry(0.235, 0.24, 0.16, 10), bottom, 0, 0.0, 0));
+  const skin = soft(o.skin), hair = soft(o.hair), bottom = soft(o.bottom), shoe = soft(o.shoes || '#7a4e34');
+  const shin = soft(o.legs || o.bottom);
+  const topMeshes = [];
+  const top = (geo, x, y, z) => { const m = mesh(geo, soft(o.top), x, y, z); topMeshes.push(m); return m; };
+  const body = new THREE.Group(); body.position.y = 0.55; root.add(body);
+  // a round, bean-shaped tummy and hips instead of a straight tube
+  const chest = top(new THREE.SphereGeometry(0.23, 20, 16), 0, 0.24, 0); chest.scale.set(1, 1.15, 0.88); body.add(chest);
+  const hips = mesh(new THREE.SphereGeometry(0.235, 20, 12), bottom, 0, 0.03, 0); hips.scale.set(0.92, 0.56, 0.84); body.add(hips);
+  body.add(mesh(new THREE.CylinderGeometry(0.075, 0.085, 0.12, 12), skin, 0, 0.49, 0)); // neck
+  // the head: a slightly squashed ball with ears, shiny eyes, a smile, blush and a fringe
   const head = new THREE.Group(); head.position.y = 0.72; body.add(head);
-  head.add(mesh(new THREE.SphereGeometry(0.33, 18, 14), skin));
-  const cap = mesh(new THREE.SphereGeometry(0.35, 18, 12, 0, TAU, 0, Math.PI * (o.longHair ? 0.62 : 0.52)), hair, 0, 0.03, -0.03); cap.rotation.x = -0.25; head.add(cap);
-  for (const x of [-0.11, 0.11]) {
-    head.add(mesh(new THREE.SphereGeometry(0.038, 8, 6), soft('#2b211c'), x, -0.02, 0.3));
-    const blush = mesh(new THREE.SphereGeometry(0.044, 8, 6), soft('#ffb1a0'), x * 1.6, -0.1, 0.27); blush.scale.z = 0.3; head.add(blush);
+  const skull = mesh(new THREE.SphereGeometry(0.33, 24, 18), skin); skull.scale.set(1.03, 0.95, 0.97); head.add(skull);
+  const cap = mesh(new THREE.SphereGeometry(0.35, 22, 14, 0, TAU, 0, Math.PI * (o.longHair ? 0.62 : 0.52)), hair, 0, 0.03, -0.03); cap.rotation.x = -0.25; head.add(cap);
+  for (const x of [-0.14, 0, 0.14]) { // the fringe, so the hair reads as hair and not a helmet
+    const bang = mesh(new THREE.SphereGeometry(0.11, 12, 8), hair, x, 0.17, Math.sqrt(0.0845 - x * x) - 0.03);
+    bang.scale.set(1.15, 0.55, 0.6); bang.rotation.z = -x * 1.5; head.add(bang);
   }
+  if (o.longHair) { const back = mesh(new THREE.SphereGeometry(0.3, 18, 12), hair, 0, -0.12, -0.13); back.scale.set(1.05, 1.15, 0.7); head.add(back); }
+  const eyeM = soft('#3a2a24'), shine = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  for (const s of [-1, 1]) {
+    const ear = mesh(new THREE.SphereGeometry(0.07, 10, 8), skin, s * 0.33, -0.03, 0); ear.scale.set(0.5, 1, 0.8); head.add(ear);
+    const eye = mesh(new THREE.SphereGeometry(0.05, 12, 10), eyeM, s * 0.115, -0.01, 0.285); eye.scale.set(0.85, 1.25, 0.5); head.add(eye);
+    const glint = new THREE.Mesh(new THREE.SphereGeometry(0.017, 8, 6), shine); glint.position.set(s * 0.115 + 0.015, 0.02, 0.31); head.add(glint);
+    const blush = mesh(new THREE.SphereGeometry(0.048, 10, 8), soft('#ffb1a0'), s * 0.19, -0.09, 0.26); blush.scale.set(1.2, 0.8, 0.3); head.add(blush);
+  }
+  const smile = mesh(new THREE.TorusGeometry(0.035, 0.011, 6, 12, Math.PI), soft('#c0604f'), 0, -0.1, 0.305); smile.rotation.z = Math.PI; head.add(smile);
+  // arms: a sleeve, a chubby forearm and a round hand
   const arm = (side) => {
     const a = new THREE.Group(); a.position.set(side * 0.27, 0.36, 0); body.add(a);
-    a.add(mesh(new THREE.CapsuleGeometry(0.065, 0.1, 3, 6), top, 0, -0.06, 0)); // sleeve
-    a.add(mesh(new THREE.CapsuleGeometry(0.058, 0.14, 3, 6), skin, 0, -0.2, 0));
+    a.add(top(new THREE.CapsuleGeometry(0.075, 0.1, 4, 10), 0, -0.07, 0));
+    a.add(mesh(new THREE.CapsuleGeometry(0.066, 0.1, 4, 10), skin, 0, -0.19, 0));
+    a.add(mesh(new THREE.SphereGeometry(0.078, 12, 10), skin, 0, -0.29, 0.01));
     const hand = new THREE.Group(); hand.position.y = -0.32; a.add(hand);
     return { a, hand };
   };
   const L = arm(-1), R = arm(1);
+  // legs: a thigh, a shin and a rounded shoe with a little white sole
   const legs = [];
+  const sole = soft('#fffaf0');
   for (const side of [-1, 1]) {
-    const leg = new THREE.Group(); leg.position.set(side * 0.11, 0.55, 0); g.add(leg);
-    leg.add(mesh(new THREE.CapsuleGeometry(0.068, 0.22, 3, 6), bottom, 0, -0.24, 0));
-    leg.add(mesh(new THREE.BoxGeometry(0.13, 0.08, 0.2), shoe, 0, -0.45, 0.03));
+    const leg = new THREE.Group(); leg.position.set(side * 0.11, 0.55, 0); root.add(leg);
+    leg.add(mesh(new THREE.CapsuleGeometry(0.088, 0.12, 4, 10), bottom, 0, -0.13, 0));
+    leg.add(mesh(new THREE.CapsuleGeometry(0.076, 0.12, 4, 10), shin, 0, -0.3, 0));
+    const toe = mesh(new THREE.SphereGeometry(0.1, 14, 10), shoe, 0, -0.43, 0.035); toe.scale.set(0.95, 0.6, 1.35); leg.add(toe);
+    const base = mesh(new THREE.CylinderGeometry(0.095, 0.095, 0.025, 14), sole, 0, -0.475, 0.035); base.scale.z = 1.35; leg.add(base);
     legs.push(leg);
   }
+  return { body, head, armL: L.a, armR: R.a, handL: L.hand, handR: R.hand, legs, topMeshes, soft };
+}
+function makeTownNpc(o) {
+  const g = new THREE.Group();
+  const p = buildChibi(g, o);
   g.add(nameTag(o.name, o.tag));
-  return { g, body, head, armL: L.a, armR: R.a, handL: L.hand, handR: R.hand, legs, soft };
+  return { g, body: p.body, head: p.head, armL: p.armL, armR: p.armR, handL: p.handL, handR: p.handR, legs: p.legs, soft: p.soft };
 }
 const SHOPKEEPERS = {
   seed: { name: 'Mira', tag: '#8fd17a', skin: '#ffd8bd', hair: '#c0703a', top: '#e97a6a', bottom: '#5d8fc4', longHair: true, dress(n) {
@@ -3117,32 +3150,17 @@ function despawn(it) {
 function makeCharacter(shirtColor) {
   const player = new THREE.Group();
   player.rotation.order = 'YXZ'; // heading first, then the swing's tilt
-  const rig = {};
-  const skin = mat('#ffd8bd', { flatShading: false }), hair = mat('#5b3a26', { flatShading: false });
-  const shirt = mat(shirtColor, { flatShading: false }), shorts = mat('#5d8fc4', { flatShading: false }), shoe = mat('#8a5a3a', { flatShading: false });
-  const body = new THREE.Group(); body.position.y = 0.55; player.add(body); rig.body = body;
-  rig.shirt = mesh(new THREE.CapsuleGeometry(0.22, 0.25, 4, 10), shirt, 0, 0.2, 0);
-  body.add(rig.shirt);
-  body.add(mesh(new THREE.CylinderGeometry(0.235, 0.24, 0.16, 10), shorts, 0, 0.0, 0));
-  const pack = mesh(new THREE.BoxGeometry(0.34, 0.36, 0.18), mat('#c89a64', { flatShading: false }), 0, 0.25, -0.24); body.add(pack);
-  body.add(mesh(new THREE.BoxGeometry(0.26, 0.12, 0.04), mat('#b0844f', { flatShading: false }), 0, 0.18, -0.34));
-  const head = new THREE.Group(); head.position.y = 0.72; body.add(head); rig.head = head;
-  head.add(mesh(new THREE.SphereGeometry(0.33, 18, 14), skin));
-  const hairCap = mesh(new THREE.SphereGeometry(0.355, 18, 12, 0, TAU, 0, Math.PI * 0.55), hair, 0, 0.03, -0.03); hairCap.rotation.x = -0.25; head.add(hairCap);
-  const tuft = mesh(new THREE.ConeGeometry(0.06, 0.16, 6), hair, 0.02, 0.38, 0.0); tuft.rotation.z = -0.4; head.add(tuft);
-  for (const x of [-0.11, 0.11]) {
-    head.add(mesh(new THREE.SphereGeometry(0.04, 8, 6), mat('#2b211c', { flatShading: false }), x, -0.02, 0.3));
-    const blush = mesh(new THREE.SphereGeometry(0.045, 8, 6), mat('#ffb1a0', { flatShading: false }), x * 1.6, -0.1, 0.27); blush.scale.z = 0.3; head.add(blush);
-  }
-  for (const side of [-1, 1]) {
-    const arm = new THREE.Group(); arm.position.set(side * 0.27, 0.36, 0); body.add(arm);
-    arm.add(mesh(new THREE.CapsuleGeometry(0.06, 0.2, 3, 6), skin, 0, -0.14, 0));
-    rig[side < 0 ? 'armL' : 'armR'] = arm;
-    const leg = new THREE.Group(); leg.position.set(side * 0.11, 0.55, 0); player.add(leg);
-    leg.add(mesh(new THREE.CapsuleGeometry(0.065, 0.22, 3, 6), skin, 0, -0.24, 0));
-    leg.add(mesh(new THREE.BoxGeometry(0.13, 0.08, 0.2), shoe, 0, -0.45, 0.03));
-    rig[side < 0 ? 'legL' : 'legR'] = leg;
-  }
+  const p = buildChibi(player, { skin: '#ffd8bd', hair: '#5b3a26', top: shirtColor, bottom: '#5d8fc4', legs: '#ffd8bd', shoes: '#f07a6a' });
+  const rig = { body: p.body, head: p.head, armL: p.armL, armR: p.armR, legL: p.legs[0], legR: p.legs[1] };
+  // the shirt colour changes once the server says who you are
+  rig.setShirt = (c) => { const m = mat(c, { flatShading: false }); for (const s of p.topMeshes) s.material = m; };
+  // a soft little backpack with a flap and a pocket
+  const packM = mat('#f2b968', { flatShading: false }), flapM = mat('#e09a4a', { flatShading: false });
+  const pack = mesh(new THREE.SphereGeometry(0.2, 18, 14), packM, 0, 0.25, -0.25); pack.scale.set(0.95, 1.05, 0.55); p.body.add(pack);
+  const flap = mesh(new THREE.SphereGeometry(0.19, 18, 10, 0, TAU, 0, Math.PI * 0.42), flapM, 0, 0.29, -0.255); flap.scale.set(0.97, 1, 0.6); p.body.add(flap);
+  const pocket = mesh(new THREE.SphereGeometry(0.09, 12, 10), flapM, 0, 0.15, -0.345); pocket.scale.set(1.3, 0.8, 0.45); p.body.add(pocket);
+  // a playful tuft on top
+  const tuft = mesh(new THREE.SphereGeometry(0.07, 10, 8), mat('#5b3a26', { flatShading: false }), 0.03, 0.36, 0.02); tuft.scale.set(0.7, 1.4, 0.7); tuft.rotation.z = -0.5; p.head.add(tuft);
   scene.add(player);
   return { player, rig };
 }
@@ -8729,7 +8747,7 @@ function handleNet(m) {
   if (m.t === 'welcome') {
     if (m.proto !== PROTOCOL) setTimeout(() => serverProblem('The game server is older than this page. Restart it (node server.js), then reload.'), 2500);
     net.online = true; net.mode = 'online'; net.id = m.id; net.myName = m.name;
-    rig.shirt.material = mat(m.color, { flatShading: false });
+    rig.setShirt(m.color);
     player.add(nameTag(`${m.name} (you)`, m.color));
     syncClock(m.clock);
     const known = new Map(m.items.map(([id, gen, active]) => [id, { gen, active }]));
