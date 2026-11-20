@@ -8952,7 +8952,7 @@ let last = performance.now(), elapsed = 0;
 // the markers are drawn over it a few times a second. Hidden indoors; it keeps following you swimming or riding.
 const minimap = (() => {
   const X0 = -100, Z0 = -86, WU = 200, DU = 172, PPU = 2; // the terrain's 200 x 172 plane, 2 pixels a unit
-  const VIEW = 70; // units across the round minimap
+  const VIEW = 46; // units across the round minimap (close enough that each place gets room)
   const root = document.getElementById('minimap'), cv = document.getElementById('minimapCanvas');
   const panel = document.getElementById('mapPanel'), bigCv = document.getElementById('mapCanvas'), tip = document.getElementById('mapTip');
   const upBtn = document.getElementById('mapNorthUp'), legendEl = document.getElementById('mapLegend');
@@ -8989,15 +8989,15 @@ const minimap = (() => {
     const ctx = base.getContext('2d'), w = base.width, h = base.height;
     const img = ctx.createImageData(w, h), d = img && img.data;
     if (d) {
-      for (let i = 0; i < d.length; i += 4) { d[i] = 150; d[i + 1] = 212; d[i + 2] = 232; d[i + 3] = 255; } // the open sea
+      for (let i = 0; i < d.length; i += 4) { d[i] = 110; d[i + 1] = 190; d[i + 2] = 228; d[i + 3] = 255; } // the open sea
       const pos = terrain.geometry.attributes.position, col = terrain.geometry.attributes.color, ox = terrain.position.x, oz = terrain.position.z;
       for (let i = 0; i < pos.count; i++) {
         const x = pos.getX(i) + ox, z = pos.getZ(i) + oz, y = pos.getY(i);
         const px = Math.floor((x - X0) * PPU), pz = Math.floor((z - Z0) * PPU);
         if (px < 0 || pz < 0 || px >= w || pz >= h) continue;
         let r, g, b;
-        if (y < -0.02) { const k = Math.min(1, -y / 1.6); r = 196 - 46 * k; g = 236 - 24 * k; b = 240 - 8 * k; } // shallow to deep, pastel
-        else if (col) { r = toSrgb(col.getX(i)); g = toSrgb(col.getY(i)); b = toSrgb(col.getZ(i)); r += (255 - r) * 0.22; g += (255 - g) * 0.22; b += (255 - b) * 0.22; }
+        if (y < -0.02) { const k = Math.min(1, -y / 1.6); r = 170 - 60 * k; g = 224 - 34 * k; b = 238 - 10 * k; } // shallow to deep, pastel
+        else if (col) { r = toSrgb(col.getX(i)); g = toSrgb(col.getY(i)); b = toSrgb(col.getZ(i)); r += (255 - r) * 0.08; g += (255 - g) * 0.08; b += (255 - b) * 0.08; }
         else { r = 170; g = 220; b = 140; }
         for (let a = 0; a < 2; a++) for (let c = 0; c < 2; c++) {
           if (px + a >= w || pz + c >= h) continue;
@@ -9015,14 +9015,15 @@ const minimap = (() => {
       ctx.restore();
     };
     // the river and the pond
-    line(RIVER_PTS, LAYOUT.river.half * 2, '#a9dcec');
-    ctx.fillStyle = '#a9dcec'; ctx.beginPath();
+    line(RIVER_PTS, LAYOUT.river.half * 2, '#86cbe8');
+    ctx.fillStyle = '#86cbe8'; ctx.beginPath();
     for (let k = 0; k <= 40; k++) { const th = (k / 40) * TAU, r = pondR(th); ctx.lineTo(LAYOUT.pond.x + Math.cos(th) * r, LAYOUT.pond.z + Math.sin(th) * r); }
     ctx.fill();
-    disc(LAYOUT.desert.oasis.x, LAYOUT.desert.oasis.z, LAYOUT.desert.oasis.r, '#a9dcec');
+    disc(LAYOUT.desert.oasis.x, LAYOUT.desert.oasis.z, LAYOUT.desert.oasis.r, '#86cbe8');
     // home yards (lawn inside a hedge), then the paths and roads over everything, the plaza and the bridges
     for (const p of PLOTS) box(p.x, p.z, PLOT_HALF, PLOT_HALF, p.face, '#d6efbc', '#8cc47a');
-    for (const [a, b, w, boards] of pathSegs) line([a, b], Math.max(0.9, w * 2), boards ? '#d9b78e' : '#f4e8cf');
+    for (const [a, b, w] of pathSegs) line([a, b], Math.max(0.9, w * 2) + 0.7, 'rgba(150,120,80,0.35)'); // a soft edge
+    for (const [a, b, w, boards] of pathSegs) line([a, b], Math.max(0.9, w * 2), boards ? '#d9b78e' : '#fbf1dc');
     disc(TOWN.x, TOWN.z, PLAZA_R, '#efe3c9', '#dccaa6');
     for (const b of bridges) { ctx.save(); ctx.translate(b.x, b.z); ctx.rotate(-Math.atan2(b.ux, b.uz)); ctx.fillStyle = '#c99a6a'; ctx.fillRect(-b.half, -b.len / 2, b.half * 2, b.len); ctx.restore(); }
     line([{ x: dockStart.x, z: dockStart.y }, pierEnd], 1.6, '#c99a6a');
@@ -9054,13 +9055,13 @@ const minimap = (() => {
     const dx = (x - cx) * s, dz = (z - cz) * s, c = Math.cos(rot), sn = Math.sin(rot);
     return { x: w / 2 + dx * c - dz * sn, y: h / 2 + dx * sn + dz * c };
   };
-  const icon = (ctx, ch, x, y, size) => { ctx.font = `${Math.round(size)}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ch, x, y); };
+  const icon = (ctx, ch, x, y, size) => { ctx.fillStyle = "#000"; ctx.font = `${Math.round(size)}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ch, x, y); };
   const badge = (ctx, x, y, r, fill, edge) => { ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); if (edge) { ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1.5, r * 0.28); ctx.stroke(); } };
   const text = (ctx, t, x, y, px, color) => { ctx.fillStyle = color; ctx.font = `bold ${Math.round(px)}px "Trebuchet MS",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, x, y); };
   const hits = []; // what's on the full map, for taps: { x, y, name }
   function drawMap(ctx, w, h, cx, cz, s, rot, full) {
     ctx.save(); ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#96d4e8'; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#6ebee4'; ctx.fillRect(0, 0, w, h);
     ctx.translate(w / 2, h / 2); ctx.rotate(rot); ctx.scale(s, s); ctx.translate(-cx, -cz);
     ctx.imageSmoothingEnabled = true; ctx.drawImage(base, X0, Z0, WU, DU);
     ctx.restore();
@@ -9071,11 +9072,17 @@ const minimap = (() => {
     if (full) hits.length = 0;
     const at = (x, z) => toScreen(x, z, cx, cz, s, rot, w, h);
     const inside = (p, pad) => (full ? p.x > -pad && p.y > -pad && p.x < w + pad && p.y < h + pad : Math.hypot(p.x - w / 2, p.y - h / 2) < w / 2 - pad);
-    const sz = full ? Math.max(16, Math.min(24, w / 30)) : Math.max(11, w / 10.5);
+    const sz = full ? Math.max(16, Math.min(24, w / 30)) : Math.max(14, w / 6.2);
+    const pin = (x, y, r, fill, edge) => { ctx.save(); ctx.shadowColor = 'rgba(70,40,15,0.35)'; ctx.shadowBlur = r * 0.5; ctx.shadowOffsetY = r * 0.15; badge(ctx, x, y, r, fill); ctx.restore(); if (edge) { ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1.5, r * 0.18); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke(); } };
     // the home plots: numbered badges, a little house on the claimed ones, a gold ring round your own
     for (const sl of plotSlots) {
       const pl = PLOTS[sl.n - 1] || sl, p = at(pl.x, pl.z); if (!inside(p, 4)) continue;
       const mine = !!sl.owner && sl.owner === net.myName, r = sz * 0.5;
+      if (!full) { // the minimap: only homes, your own one gold with a star; free plots stay off it
+        if (mine) { pin(p.x, p.y, r * 0.95, '#ffe28a', '#e0a020'); text(ctx, '★', p.x, p.y + 0.5, r * 1.3, '#c98a10'); }
+        else if (sl.owner) { pin(p.x, p.y, r * 0.7, '#fffaf0', '#c9a87a'); icon(ctx, '🏠', p.x, p.y + 0.5, r * 0.95); }
+        continue;
+      }
       badge(ctx, p.x, p.y, r, mine ? '#ffe28a' : '#fffaf0', mine ? '#e0a020' : '#8c6a48');
       if (sl.owner) { icon(ctx, '🏠', p.x, p.y, sz * 0.7); text(ctx, String(sl.n), p.x + r * 0.95, p.y - r * 0.8, r * 0.85, '#5a4632'); }
       else text(ctx, String(sl.n), p.x, p.y + 0.5, r * 1.15, '#5a4632');
@@ -9084,8 +9091,9 @@ const minimap = (() => {
     for (const pl of places) {
       if (!full && pl.fish) continue; // the full map shows the fishing spots; the minimap keeps it simple
       const p = at(pl.x, pl.z); if (!inside(p, 4)) continue;
-      badge(ctx, p.x, p.y, sz * 0.52, 'rgba(255,250,240,0.82)');
-      icon(ctx, pl.icon, p.x, p.y + 0.5, sz * 0.72);
+      if (full) badge(ctx, p.x, p.y, sz * 0.52, 'rgba(255,250,240,0.82)');
+      else pin(p.x, p.y, sz * 0.5, '#fffaf0', '#c9a87a');
+      icon(ctx, pl.icon, p.x, p.y + 0.5, sz * 0.66);
       if (full) hits.push({ x: p.x, y: p.y, name: pl.name });
     }
     // Bo, wandering round the homes
@@ -9116,9 +9124,12 @@ const minimap = (() => {
     }
     // the compass: a little N on the rim where north (-z) is
     if (!full) {
-      const R = w / 2 - sz * 0.62, x = w / 2 + Math.sin(rot) * R, y = h / 2 - Math.cos(rot) * R;
-      badge(ctx, x, y, sz * 0.5, '#e2735a', '#fffaf0');
-      text(ctx, 'N', x, y + 0.5, sz * 0.6, '#fffaf0');
+      const rim = ctx.createRadialGradient(w / 2, h / 2, w * 0.3, w / 2, h / 2, w / 2);
+      rim.addColorStop(0, 'rgba(60,40,20,0)'); rim.addColorStop(1, 'rgba(60,40,20,0.22)');
+      ctx.fillStyle = rim; ctx.fillRect(0, 0, w, h);
+      const R = w / 2 - sz * 0.42, x = w / 2 + Math.sin(rot) * R, y = h / 2 - Math.cos(rot) * R;
+      badge(ctx, x, y, sz * 0.34, '#e2735a', '#fffaf0');
+      text(ctx, 'N', x, y + 0.5, sz * 0.42, '#fffaf0');
     }
   }
 
