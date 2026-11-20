@@ -9,4 +9,5 @@ ref/
 rabbit_preview.png
 rabbit_reference_preview.png
 # local tool settings
-.claude/
+.claude/*
+!.claude/skills/
