@@ -9062,7 +9062,8 @@ const minimap = (() => {
   // ---- the minimap's own flat icons: a white symbol on a coloured pin per place (crisper than emoji at this size)
   const GLYPH = { '⛲': ['fountain', '#5fb8e0'], '👗': ['shirt', '#f08ab0'], '🌱': ['sprout', '#6dbb5a'], '🛋️': ['sofa', '#e0a05e'],
     '🐾': ['paw', '#a98ad8'], '🚲': ['bike', '#4fa3dc'], '🎹': ['piano', '#e486a8'], '🎡': ['wheel', '#b77fd6'], '🎠': ['tent', '#f0a050'],
-    '🎈': ['balloon', '#ef6666'], '🍤': ['bowl', '#e5844f'], '🏐': ['ball', '#e8b730'], '🍌': ['boat', '#e0b62a'], '🪷': ['lotus', '#3fae9e'], '🎣': ['fish', '#4f9fd8'] };
+    '🎈': ['balloon', '#ef6666'], '🍤': ['bowl', '#e5844f'], '🏐': ['ball', '#e8b730'], '🍌': ['boat', '#e0b62a'], '🪷': ['lotus', '#3fae9e'], '🎣': ['fish', '#4f9fd8'],
+    '🏠': ['house', '#b9967a'], '★': ['star', '#f2b632'], '🎒': ['bag', '#e8a93a'] };
   function glyph(ctx, kind, x, y, r) {
     ctx.save(); ctx.translate(x, y); ctx.scale(r / 10, r / 10);
     ctx.fillStyle = ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.8; ctx.lineCap = ctx.lineJoin = 'round';
@@ -9084,6 +9085,7 @@ const minimap = (() => {
     else if (kind === 'lotus') { P(); ctx.moveTo(0, 4); ctx.bezierCurveTo(-3, 1, -2, -4, 0, -6); ctx.bezierCurveTo(2, -4, 3, 1, 0, 4); ctx.moveTo(0, 4); ctx.bezierCurveTo(-5, 4, -7, -1, -6, -3); ctx.bezierCurveTo(-3, -2, -1, 1, 0, 4); ctx.moveTo(0, 4); ctx.bezierCurveTo(5, 4, 7, -1, 6, -3); ctx.bezierCurveTo(3, -2, 1, 1, 0, 4); ctx.fill(); }
     else if (kind === 'fish') { P(); ctx.ellipse(-1, 0, 4.5, 3, 0, 0, TAU); ctx.moveTo(2.5, 0); ctx.lineTo(6.5, -3.5); ctx.lineTo(6.5, 3.5); ctx.closePath(); ctx.fill(); }
     else if (kind === 'house') { P(); ctx.moveTo(0, -6); ctx.lineTo(6.5, 0); ctx.lineTo(4.5, 0); ctx.lineTo(4.5, 5.5); ctx.lineTo(-4.5, 5.5); ctx.lineTo(-4.5, 0); ctx.lineTo(-6.5, 0); ctx.closePath(); ctx.fill(); }
+    else if (kind === 'bag') { P(); RR(-5, -3, 10, 9, 2.5); ctx.fill(); P(); ctx.moveTo(-2.5, -3); ctx.quadraticCurveTo(-2.5, -6.5, 0, -6.5); ctx.quadraticCurveTo(2.5, -6.5, 2.5, -3); ctx.lineWidth = 1.5; ctx.stroke(); ctx.fillStyle = '#e8a93a'; ctx.fillRect(-3, 0.5, 6, 1.4); }
     else if (kind === 'star') { P(); for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + (k / 10) * TAU, rr = k % 2 ? 2.8 : 6.5; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr + 0.5); } ctx.closePath(); ctx.fill(); }
     ctx.restore();
   }
@@ -9112,24 +9114,25 @@ const minimap = (() => {
         else if (sl.owner) { pin(p.x, p.y, r * 0.7, '#b9967a', '#ffffff'); glyph(ctx, 'house', p.x, p.y, r * 0.7); }
         continue;
       }
-      badge(ctx, p.x, p.y, r, mine ? '#ffe28a' : '#fffaf0', mine ? '#e0a020' : '#8c6a48');
-      if (sl.owner) { icon(ctx, '🏠', p.x, p.y, sz * 0.7); text(ctx, String(sl.n), p.x + r * 0.95, p.y - r * 0.8, r * 0.85, '#5a4632'); }
-      else text(ctx, String(sl.n), p.x, p.y + 0.5, r * 1.15, '#5a4632');
+      if (sl.owner) {
+        pin(p.x, p.y, r, mine ? '#f2b632' : '#b9967a', '#ffffff'); glyph(ctx, mine ? 'star' : 'house', p.x, p.y, r);
+        const tx = p.x + r * 0.9, ty = p.y - r * 0.85; badge(ctx, tx, ty, r * 0.48, '#fffaf0', '#8c6a48'); text(ctx, String(sl.n), tx, ty + 0.5, r * 0.6, '#5a4632');
+      } else { badge(ctx, p.x, p.y, r, '#fffaf0', '#8c6a48'); text(ctx, String(sl.n), p.x, p.y + 0.5, r * 1.15, '#5a4632'); }
       if (full) hits.push({ x: p.x, y: p.y, name: `Home plot ${sl.n}${sl.owner ? (mine ? ' (your home)' : ` (${sl.owner}'s home)`) : ' (free)'}` });
     }
     for (const pl of places) {
       if (!full && pl.fish) continue; // the full map shows the fishing spots; the minimap keeps it simple
       const p = at(pl.x, pl.z); if (!inside(p, 4)) continue;
-      if (full) { badge(ctx, p.x, p.y, sz * 0.52, 'rgba(255,250,240,0.82)'); icon(ctx, pl.icon, p.x, p.y + 0.5, sz * 0.66); }
-      else { const [k, col] = GLYPH[pl.icon] || ['fountain', '#8c6a48']; pin(p.x, p.y, sz * 0.46, col, '#ffffff'); glyph(ctx, k, p.x, p.y, sz * 0.46); }
+      const [k, col] = GLYPH[pl.icon] || ['fountain', '#8c6a48'], pr = sz * (full ? 0.55 : 0.46);
+      pin(p.x, p.y, pr, col, '#ffffff'); glyph(ctx, k, p.x, p.y, pr);
       if (full) hits.push({ x: p.x, y: p.y, name: pl.name });
     }
     // Bo, wandering round the homes
     {
       const p = at(bo.g.position.x, bo.g.position.z);
       if (inside(p, 4)) {
-        badge(ctx, p.x, p.y, sz * 0.32, '#f2c94c', '#ffffff');
-        if (full) { icon(ctx, '🎒', p.x, p.y - sz * 0.6, sz * 0.6); hits.push({ x: p.x, y: p.y, name: 'Bo the wandering trader' }); }
+        if (full) { pin(p.x, p.y, sz * 0.5, '#e8a93a', '#ffffff'); glyph(ctx, 'bag', p.x, p.y, sz * 0.5); hits.push({ x: p.x, y: p.y, name: 'Bo the wandering trader' }); }
+        else badge(ctx, p.x, p.y, sz * 0.32, '#f2c94c', '#ffffff');
       }
     }
     // the other players
@@ -9198,7 +9201,12 @@ const minimap = (() => {
     northUp = !northUp; syncUp(); wait = 0;
     try { localStorage.setItem('driftwood.mapNorthUp', northUp ? '1' : '0'); } catch { /* not remembered this time */ }
   });
-  legendEl.innerHTML = LEGEND.map(([ic, name]) => `<span class="lg"><b class="${/^[0-9★●▲]$/.test(ic) ? 'sym' : ''}">${ic}</b>${name}</span>`).join('');
+  const legendPin = (ic) => {
+    const c = document.createElement('canvas'); c.width = c.height = 40; const g = c.getContext('2d'), [k, col] = GLYPH[ic];
+    g.fillStyle = col; g.beginPath(); g.arc(20, 20, 17, 0, TAU); g.fill(); g.strokeStyle = '#ffffff'; g.lineWidth = 3; g.stroke(); glyph(g, k, 20, 20, 17);
+    return `<img src="${c.toDataURL()}" alt="" width="20" height="20">`;
+  };
+  legendEl.innerHTML = LEGEND.map(([ic, name]) => `<span class="lg"><b class="${GLYPH[ic] ? 'pin' : 'sym'}">${GLYPH[ic] ? legendPin(ic) : ic}</b>${name}</span>`).join('');
   bigCv.addEventListener('click', (e) => { // tap a place, a plot, a player or Bo: its name
     if (!bigFit) return;
     const rc = bigCv.getBoundingClientRect ? bigCv.getBoundingClientRect() : { left: 0, top: 0 };
