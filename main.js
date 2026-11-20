@@ -88,10 +88,11 @@ const glowTex = radialTexture();
 
 // ---------------------------------------------------------------- renderer / scene
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
+const MAX_DPR = 1.5; // sharper than this costs a lot of speed on phones and high-DPI screens for little visible gain
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap; // soft PCF samples many more times for nearly the same look
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.domElement.id = 'game';
@@ -2646,6 +2647,18 @@ avoid.push({ x: LAYOUT.islandGarden.x, z: LAYOUT.islandGarden.z, r: 3.2 });
 avoid.push({ x: TOWN.x, z: TOWN.z + PLAZA_R + 3, r: 3.5 });
 const scenery = island.buildScenery({ scene, rr, rand: () => rand(), pick, mesh, mat, M, place, blocked, colliders, avoid, lampData, glowTex, makeAwning, makeBench, loop: LOOP, bridges });
 const { palms, trees, swayers, grassTufts, lighthouse, sailboats } = scenery;
+// the town stays open: only about one tree in four within TOWN_CLEAR of the plaza is kept (the same ones on every screen)
+{
+  const TOWN_CLEAR = 26;
+  for (let i = trees.length - 1; i >= 0; i--) {
+    const t = trees[i], x = t.position.x, z = t.position.z;
+    if (Math.hypot(x - TOWN.x, z - TOWN.z) > TOWN_CLEAR || hash(Math.round(x * 10), Math.round(z * 10)) < 0.25) continue;
+    scene.remove(t); trees.splice(i, 1);
+    const sw = swayers.findIndex((s) => s.o === t.userData.sway); if (sw >= 0) swayers.splice(sw, 1);
+    const c = colliders.findIndex((q) => q.x === x && q.z === z); if (c >= 0) colliders.splice(c, 1);
+    const a = avoid.findIndex((q) => q.x === x && q.z === z); if (a >= 0) avoid.splice(a, 1);
+  }
+}
 // the piano's glade: an 8 x 8 square round PIANO kept free of trees, bushes and props. Anything grown there is moved just
 // outside it (away from the plaza side, so nothing stands between the piano and the walking traffic), except the one
 // cherry tree behind the piano, which stays right beside it. Its trunk, shadow and collision move along with it.
@@ -2715,15 +2728,20 @@ const updateSailboats = (dt) => scenery.updateSailboats(dt, nowMs() / 1000);
 // Fruit shown in the crown hides after a harvest and comes back when the tree has regrown (timestamp based).
 const TREE_REGROW_MS = 90000;
 const fruitTrees = [];
+const FRUIT_GEO = (() => { // three small fruits round the crown, merged so each fruit tree adds one draw call
+  const g = [[0.9, 0.6, 0.5], [-0.7, 0.9, 0.7], [0.2, 0.4, -1.0]].map(([x, y, z]) => new THREE.SphereGeometry(0.16, 8, 6).toNonIndexed().translate(x, y, z));
+  const n = g.reduce((s, q) => s + q.attributes.position.count, 0), pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
+  let k = 0; for (const q of g) { pos.set(q.attributes.position.array, k * 3); nor.set(q.attributes.normal.array, k * 3); k += q.attributes.position.count; }
+  const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(pos, 3)); out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  return out;
+})();
 function setupFruitTree(obj, kind, colR) {
   const crown = obj.userData.sway;
   let fruits;
   if (kind === 'coconut') fruits = crown.children.filter((c) => c.geometry && c.geometry.type === 'SphereGeometry');
   else {
     const color = kind === 'mango' ? '#ffc23a' : '#f2b632';
-    fruits = [[0.9, 0.6, 0.5], [-0.7, 0.9, 0.7], [0.2, 0.4, -1.0]].map(([x, y, z]) => {
-      const f = mesh(new THREE.SphereGeometry(0.16, 8, 6), mat(color), x, y, z); crown.add(f); return f;
-    });
+    const f = mesh(FRUIT_GEO, mat(color)); f.castShadow = false; crown.add(f); fruits = [f]; // all three fruits in one mesh
   }
   const tree = { id: fruitTrees.length, obj, kind, fruits, readyAt: 0, shakeT: 0, reach: colR + 0.65 }; // readyAt in server time
   obj.traverse((o) => { o.userData.fruitTree = tree; });
@@ -2746,7 +2764,12 @@ const blossoms = (() => {
   const pinks = [mat('#f6b8d0'), mat('#f29ab8'), mat('#ffd3e2')];
   for (const t of picked) {
     const crown = t.userData.sway;
-    crown.children.forEach((m, i) => { if (m.isMesh) m.material = pinks[(i + Math.round(t.position.x)) % 3 < 0 ? 0 : (i + Math.round(t.position.x)) % 3]; });
+    crown.children.forEach((m) => {
+      const parts = m.isMesh && m.geometry.userData.parts; if (!parts) return;
+      const col = m.geometry.attributes.color;
+      parts.forEach((pt, i) => { const c = pinks[((i + Math.round(t.position.x)) % 3 + 3) % 3].color; for (let v = pt.start; v < pt.start + pt.count; v++) col.setXYZ(v, c.r, c.g, c.b); });
+      col.needsUpdate = true;
+    });
     trees.splice(trees.indexOf(t), 1); // not a fruit tree
   }
   // falling petals: one small points cloud, each petal drifting down under a random pink tree and starting again
@@ -3825,7 +3848,7 @@ document.getElementById('clock').addEventListener('click', (e) => {
 // the game fills the whole window at the device's pixel ratio; refit on resize, rotation and mobile UI bars
 function fitToWindow() {
   const w = Math.max(1, window.innerWidth), h = Math.max(1, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
   renderer.setSize(w, h);
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }

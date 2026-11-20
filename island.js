@@ -947,18 +947,43 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
     const { scene, rr, rand, pick, mesh, mat, M, place, blocked, colliders, avoid, lampData, glowTex, makeAwning, makeBench, loop } = ctx;
     let volcano = null, capybaras = [];
     const leafSets = [[mat('#7dc64a'), mat('#5aa83e'), mat('#9ad65a')], [mat('#4f9e3c'), mat('#3a8a36'), mat('#6cba48')], [mat('#5fb048'), mat('#2f7a35'), mat('#86cc52')]];
+    // Several balls of foliage are baked into ONE mesh whose shades are painted into its vertices, so a tree costs
+    // two draw calls (trunk + crown) instead of eight or nine. geometry.userData.parts keeps each ball's vertex range
+    // (main.js repaints them pink for the cherry blossoms).
+    const ICO = new THREE.IcosahedronGeometry(1, 1).toNonIndexed(), SPH = new THREE.SphereGeometry(1, 6, 4).toNonIndexed();
+    const bakedMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
+    function bake(balls) { // balls: [{ geo (unit, non-indexed), r, x, y, z, color }]
+      let n = 0; for (const b of balls) n += b.geo.attributes.position.count;
+      const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), parts = [];
+      let k = 0;
+      for (const b of balls) {
+        const src = b.geo.attributes.position, c = b.color, start = k;
+        for (let i = 0; i < src.count; i++, k++) {
+          pos[k * 3] = src.getX(i) * b.r + b.x; pos[k * 3 + 1] = src.getY(i) * b.r + b.y; pos[k * 3 + 2] = src.getZ(i) * b.r + b.z;
+          col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
+        }
+        parts.push({ start, count: k - start });
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      geo.computeVertexNormals(); geo.userData.parts = parts;
+      return mesh(geo, bakedMat);
+    }
     function makeTree(size = 1) {
       const g = new THREE.Group(), [mid, dark, light] = pick(leafSets);
       const h = rr(1.0, 1.4);
       g.add(mesh(new THREE.CylinderGeometry(0.15, 0.25, h, 7), M.trunk, 0, h / 2, 0));
       const crown = new THREE.Group(); crown.position.y = h; g.add(crown);
-      crown.add(mesh(new THREE.IcosahedronGeometry(1.25, 1), mid, 0, 0.9, 0));
+      const balls = [{ geo: ICO, r: 1.25, x: 0, y: 0.9, z: 0, color: mid.color }];
       const n = 4 + Math.floor(rand() * 3);
       for (let i = 0; i < n; i++) {
         const a = (i / n) * TAU + rr(-0.3, 0.3), s = rr(0.65, 0.95), up = rr(0.4, 1.3);
-        crown.add(mesh(new THREE.IcosahedronGeometry(s, 1), up > 0.95 ? light : up < 0.65 ? dark : mid, Math.cos(a) * rr(0.7, 1.0), up, Math.sin(a) * rr(0.7, 1.0)));
+        const m = up > 0.95 ? light : up < 0.65 ? dark : mid, x = Math.cos(a) * rr(0.7, 1.0), z = Math.sin(a) * rr(0.7, 1.0);
+        balls.push({ geo: ICO, r: s, x, y: up, z, color: m.color });
       }
-      crown.add(mesh(new THREE.IcosahedronGeometry(0.75, 1), light, rr(-0.2, 0.2), 1.75, rr(-0.2, 0.2)));
+      const tx = rr(-0.2, 0.2), tz = rr(-0.2, 0.2);
+      balls.push({ geo: ICO, r: 0.75, x: tx, y: 1.75, z: tz, color: light.color });
+      crown.add(bake(balls));
       g.userData.sway = crown;
       g.scale.setScalar(size * rr(0.85, 1.12));
       return g;
@@ -986,9 +1011,10 @@ export function createIsland({ THREE, hash, vnoise, fbm, smooth, lerp, TAU }) {
       return g;
     }
     function makeBush() {
-      const g = new THREE.Group(), [mid, dark, light] = pick(leafSets);
-      for (let i = 0; i < 3; i++) g.add(mesh(new THREE.IcosahedronGeometry(rr(0.34, 0.5), 1), pick([mid, dark, light]), rr(-0.3, 0.3), 0.28, rr(-0.3, 0.3)));
-      if (rand() < 0.4) for (let i = 0; i < 4; i++) { const a = rr(0, TAU); g.add(mesh(new THREE.SphereGeometry(0.07, 6, 4), pick([M.flowerW, M.flowerY, mat('#ff9ec4')]), Math.cos(a) * 0.45, rr(0.35, 0.6), Math.sin(a) * 0.45)); }
+      const g = new THREE.Group(), [mid, dark, light] = pick(leafSets), balls = [];
+      for (let i = 0; i < 3; i++) { const r = rr(0.34, 0.5), m = pick([mid, dark, light]), x = rr(-0.3, 0.3), z = rr(-0.3, 0.3); balls.push({ geo: ICO, r, x, y: 0.28, z, color: m.color }); }
+      if (rand() < 0.4) for (let i = 0; i < 4; i++) { const a = rr(0, TAU), m = pick([M.flowerW, M.flowerY, mat('#ff9ec4')]), y = rr(0.35, 0.6); balls.push({ geo: SPH, r: 0.07, x: Math.cos(a) * 0.45, y, z: Math.sin(a) * 0.45, color: m.color }); }
+      g.add(bake(balls));
       return g;
     }
     const rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, flatShading: true });
