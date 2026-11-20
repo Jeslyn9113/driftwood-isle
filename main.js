@@ -9058,6 +9058,35 @@ const minimap = (() => {
   const icon = (ctx, ch, x, y, size) => { ctx.fillStyle = "#000"; ctx.font = `${Math.round(size)}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ch, x, y); };
   const badge = (ctx, x, y, r, fill, edge) => { ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); if (edge) { ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1.5, r * 0.28); ctx.stroke(); } };
   const text = (ctx, t, x, y, px, color) => { ctx.fillStyle = color; ctx.font = `bold ${Math.round(px)}px "Trebuchet MS",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, x, y); };
+
+  // ---- the minimap's own flat icons: a white symbol on a coloured pin per place (crisper than emoji at this size)
+  const GLYPH = { '⛲': ['fountain', '#5fb8e0'], '👗': ['shirt', '#f08ab0'], '🌱': ['sprout', '#6dbb5a'], '🛋️': ['sofa', '#e0a05e'],
+    '🐾': ['paw', '#a98ad8'], '🚲': ['bike', '#4fa3dc'], '🎹': ['piano', '#e486a8'], '🎡': ['wheel', '#b77fd6'], '🎠': ['tent', '#f0a050'],
+    '🎈': ['balloon', '#ef6666'], '🍤': ['bowl', '#e5844f'], '🏐': ['ball', '#e8b730'], '🍌': ['boat', '#e0b62a'], '🪷': ['lotus', '#3fae9e'], '🎣': ['fish', '#4f9fd8'] };
+  function glyph(ctx, kind, x, y, r) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(r / 10, r / 10);
+    ctx.fillStyle = ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.8; ctx.lineCap = ctx.lineJoin = 'round';
+    const P = () => ctx.beginPath(), C = (cx, cy, rr) => { ctx.moveTo(cx + rr, cy); ctx.arc(cx, cy, rr, 0, TAU); };
+    const RR = (x0, y0, w0, h0, r0) => { if (ctx.roundRect) ctx.roundRect(x0, y0, w0, h0, r0); else ctx.rect(x0, y0, w0, h0); };
+    if (kind === 'fountain') { P(); ctx.moveTo(0, 5); ctx.bezierCurveTo(-6, -1, -2, -5, 0, -6); ctx.bezierCurveTo(2, -5, 6, -1, 0, 5); ctx.fill(); }
+    else if (kind === 'shirt') { P(); ctx.moveTo(-2.5, -5.5); ctx.lineTo(-6.5, -3); ctx.lineTo(-5, 0); ctx.lineTo(-3.5, -1); ctx.lineTo(-3.5, 5.5); ctx.lineTo(3.5, 5.5); ctx.lineTo(3.5, -1); ctx.lineTo(5, 0); ctx.lineTo(6.5, -3); ctx.lineTo(2.5, -5.5); ctx.quadraticCurveTo(0, -3, -2.5, -5.5); ctx.fill(); }
+    else if (kind === 'sprout') { P(); ctx.moveTo(0, 6); ctx.lineTo(0, -1); ctx.stroke(); P(); ctx.moveTo(0, -1); ctx.bezierCurveTo(-1, -6, -6, -6, -6, -3); ctx.bezierCurveTo(-6, 0, -1, 0, 0, -1); ctx.fill(); P(); ctx.moveTo(0, 1); ctx.bezierCurveTo(1, -4, 6, -4, 6, -1); ctx.bezierCurveTo(6, 2, 1, 2, 0, 1); ctx.fill(); }
+    else if (kind === 'sofa') { P(); RR(-4.5, -4, 9, 5, 1.5); RR(-6.5, -1, 3, 5, 1.2); RR(3.5, -1, 3, 5, 1.2); RR(-4.5, 0.5, 9, 3.5, 1); ctx.fill(); P(); ctx.moveTo(-5, 4); ctx.lineTo(-5, 6); ctx.moveTo(5, 4); ctx.lineTo(5, 6); ctx.stroke(); }
+    else if (kind === 'paw') { P(); ctx.ellipse(0, 2.5, 3.6, 3, 0, 0, TAU); C(-4.6, -1.5, 1.6); C(-1.7, -4.5, 1.7); C(1.7, -4.5, 1.7); C(4.6, -1.5, 1.6); ctx.fill(); }
+    else if (kind === 'bike') { ctx.lineWidth = 1.5; P(); C(-4, 2, 3); C(4, 2, 3); ctx.stroke(); P(); ctx.moveTo(-4, 2); ctx.lineTo(-1, -3); ctx.lineTo(3, -3); ctx.lineTo(4, 2); ctx.moveTo(-1, -3); ctx.lineTo(0, 2); ctx.lineTo(3, -3); ctx.moveTo(-2.5, -4.5); ctx.lineTo(0, -4.5); ctx.stroke(); }
+    else if (kind === 'piano') { P(); RR(-6, -4.5, 12, 9, 1.5); ctx.fill(); ctx.fillStyle = '#3a2a30'; for (const k of [-3, 0, 3]) ctx.fillRect(k - 0.7, -4.5, 1.4, 5); ctx.strokeStyle = '#e486a8'; ctx.lineWidth = 0.6; P(); for (const k of [-4.5, -1.5, 1.5, 4.5]) { ctx.moveTo(k, 1); ctx.lineTo(k, 4.5); } ctx.stroke(); }
+    else if (kind === 'wheel') { ctx.lineWidth = 1.5; P(); C(0, -1, 4.8); ctx.stroke(); P(); for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; ctx.moveTo(0, -1); ctx.lineTo(Math.cos(a) * 4.8, -1 + Math.sin(a) * 4.8); } ctx.moveTo(-3, 6); ctx.lineTo(0, -1); ctx.lineTo(3, 6); ctx.stroke(); }
+    else if (kind === 'tent') { P(); ctx.moveTo(0, -6.5); ctx.lineTo(6.5, -1); ctx.lineTo(-6.5, -1); ctx.closePath(); ctx.fill(); P(); ctx.moveTo(-4.5, -1); ctx.lineTo(-4.5, 5.5); ctx.moveTo(4.5, -1); ctx.lineTo(4.5, 5.5); ctx.moveTo(-5.5, 5.5); ctx.lineTo(5.5, 5.5); ctx.stroke(); P(); C(0, 2.5, 1.6); ctx.fill(); }
+    else if (kind === 'balloon') { P(); ctx.ellipse(0, -2, 4.3, 5, 0, 0, TAU); ctx.fill(); P(); ctx.moveTo(0, 3); ctx.quadraticCurveTo(-1.5, 5, 0.5, 7); ctx.lineWidth = 1.2; ctx.stroke(); }
+    else if (kind === 'bowl') { P(); ctx.moveTo(-6, -0.5); ctx.lineTo(6, -0.5); ctx.quadraticCurveTo(5.5, 5.5, 0, 5.5); ctx.quadraticCurveTo(-5.5, 5.5, -6, -0.5); ctx.fill(); P(); ctx.moveTo(-1, -2); ctx.quadraticCurveTo(-2, -4, -1, -6); ctx.moveTo(2, -2); ctx.quadraticCurveTo(1, -4, 2, -6); ctx.lineWidth = 1.3; ctx.stroke(); }
+    else if (kind === 'ball') { ctx.lineWidth = 1.4; P(); C(0, 0, 5.5); ctx.stroke(); P(); ctx.moveTo(-5.2, -1.8); ctx.quadraticCurveTo(0, 0, 2.5, 4.9); ctx.moveTo(0.5, -5.5); ctx.quadraticCurveTo(-0.5, 0, -4.6, 3); ctx.moveTo(1, -0.5); ctx.quadraticCurveTo(4, -2, 5.4, 1); ctx.stroke(); }
+    else if (kind === 'boat') { P(); ctx.moveTo(-6.5, 1); ctx.lineTo(6.5, 1); ctx.lineTo(4, 5); ctx.lineTo(-4, 5); ctx.closePath(); ctx.fill(); P(); ctx.moveTo(-0.5, -6); ctx.lineTo(-0.5, 0); ctx.lineTo(4.5, 0); ctx.closePath(); ctx.fill(); }
+    else if (kind === 'lotus') { P(); ctx.moveTo(0, 4); ctx.bezierCurveTo(-3, 1, -2, -4, 0, -6); ctx.bezierCurveTo(2, -4, 3, 1, 0, 4); ctx.moveTo(0, 4); ctx.bezierCurveTo(-5, 4, -7, -1, -6, -3); ctx.bezierCurveTo(-3, -2, -1, 1, 0, 4); ctx.moveTo(0, 4); ctx.bezierCurveTo(5, 4, 7, -1, 6, -3); ctx.bezierCurveTo(3, -2, 1, 1, 0, 4); ctx.fill(); }
+    else if (kind === 'fish') { P(); ctx.ellipse(-1, 0, 4.5, 3, 0, 0, TAU); ctx.moveTo(2.5, 0); ctx.lineTo(6.5, -3.5); ctx.lineTo(6.5, 3.5); ctx.closePath(); ctx.fill(); }
+    else if (kind === 'house') { P(); ctx.moveTo(0, -6); ctx.lineTo(6.5, 0); ctx.lineTo(4.5, 0); ctx.lineTo(4.5, 5.5); ctx.lineTo(-4.5, 5.5); ctx.lineTo(-4.5, 0); ctx.lineTo(-6.5, 0); ctx.closePath(); ctx.fill(); }
+    else if (kind === 'star') { P(); for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + (k / 10) * TAU, rr = k % 2 ? 2.8 : 6.5; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr + 0.5); } ctx.closePath(); ctx.fill(); }
+    ctx.restore();
+  }
   const hits = []; // what's on the full map, for taps: { x, y, name }
   function drawMap(ctx, w, h, cx, cz, s, rot, full) {
     ctx.save(); ctx.clearRect(0, 0, w, h);
@@ -9079,8 +9108,8 @@ const minimap = (() => {
       const pl = PLOTS[sl.n - 1] || sl, p = at(pl.x, pl.z); if (!inside(p, 4)) continue;
       const mine = !!sl.owner && sl.owner === net.myName, r = sz * 0.5;
       if (!full) { // the minimap: only homes, your own one gold with a star; free plots stay off it
-        if (mine) { pin(p.x, p.y, r * 0.95, '#ffe28a', '#e0a020'); text(ctx, '★', p.x, p.y + 0.5, r * 1.3, '#c98a10'); }
-        else if (sl.owner) { pin(p.x, p.y, r * 0.7, '#fffaf0', '#c9a87a'); icon(ctx, '🏠', p.x, p.y + 0.5, r * 0.95); }
+        if (mine) { pin(p.x, p.y, r * 0.95, '#f2b632', '#ffffff'); glyph(ctx, 'star', p.x, p.y, r * 0.95); }
+        else if (sl.owner) { pin(p.x, p.y, r * 0.7, '#b9967a', '#ffffff'); glyph(ctx, 'house', p.x, p.y, r * 0.7); }
         continue;
       }
       badge(ctx, p.x, p.y, r, mine ? '#ffe28a' : '#fffaf0', mine ? '#e0a020' : '#8c6a48');
@@ -9091,9 +9120,8 @@ const minimap = (() => {
     for (const pl of places) {
       if (!full && pl.fish) continue; // the full map shows the fishing spots; the minimap keeps it simple
       const p = at(pl.x, pl.z); if (!inside(p, 4)) continue;
-      if (full) badge(ctx, p.x, p.y, sz * 0.52, 'rgba(255,250,240,0.82)');
-      else pin(p.x, p.y, sz * 0.5, '#fffaf0', '#c9a87a');
-      icon(ctx, pl.icon, p.x, p.y + 0.5, sz * 0.66);
+      if (full) { badge(ctx, p.x, p.y, sz * 0.52, 'rgba(255,250,240,0.82)'); icon(ctx, pl.icon, p.x, p.y + 0.5, sz * 0.66); }
+      else { const [k, col] = GLYPH[pl.icon] || ['fountain', '#8c6a48']; pin(p.x, p.y, sz * 0.46, col, '#ffffff'); glyph(ctx, k, p.x, p.y, sz * 0.46); }
       if (full) hits.push({ x: p.x, y: p.y, name: pl.name });
     }
     // Bo, wandering round the homes
@@ -9142,6 +9170,8 @@ const minimap = (() => {
     wait = 0; if (open) bigLayout();
   }
   window.addEventListener('resize', fit);
+  if (window.ResizeObserver) new ResizeObserver(() => fit()).observe(cv); // also when the circle's size changes (or first appears)
+  fit();
   const camRot = () => (northUp ? 0 : orbit.yaw); // camera-up: the way the camera looks points up the map
   const swallow = (e) => { e.stopPropagation(); if (e.cancelable) e.preventDefault(); };
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'wheel', 'contextmenu']) root.addEventListener(t, swallow, { passive: false });
@@ -9185,7 +9215,7 @@ const minimap = (() => {
     root.classList.toggle('hidden', hide);
     if (hide && open) closeMap();
     root.classList.toggle('night', (cur.night || 0) > 0.5);
-    if (!cv.width) fit();
+    if (!hide && cv.clientWidth && (cv.width !== cv.height || Math.abs(cv.width - Math.round(cv.clientWidth * Math.min(2, window.devicePixelRatio || 1))) > 1)) fit(); // square, sharp, and refit if the circle changes size
     if (!hide && (wait -= dt) <= 0) {
       wait = 1 / 15;
       const w = cv.width, h = cv.height;
