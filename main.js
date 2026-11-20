@@ -2649,10 +2649,19 @@ const scenery = island.buildScenery({ scene, rr, rand: () => rand(), pick, mesh,
 const { palms, trees, swayers, grassTufts, lighthouse, sailboats } = scenery;
 // the town stays open: only about one tree in four within TOWN_CLEAR of the plaza is kept (the same ones on every screen)
 {
-  const TOWN_CLEAR = 26;
+  // and everywhere else the groves are thinned so canopies don't merge into one carpet: a tree goes when one kept
+  // before it (in a fixed order from its position) stands closer than TREE_GAP
+  const TOWN_CLEAR = 26, TREE_GAP = 3.4;
+  const key = (t) => hash(Math.round(t.position.x * 10), Math.round(t.position.z * 10));
+  const kept = [], drop = new Set();
+  for (const t of [...trees].sort((a, b) => key(b) - key(a))) {
+    const x = t.position.x, z = t.position.z;
+    const inTown = Math.hypot(x - TOWN.x, z - TOWN.z) < TOWN_CLEAR && key(t) >= 0.25;
+    if (inTown || kept.some((k) => Math.hypot(k.position.x - x, k.position.z - z) < TREE_GAP)) drop.add(t); else kept.push(t);
+  }
   for (let i = trees.length - 1; i >= 0; i--) {
     const t = trees[i], x = t.position.x, z = t.position.z;
-    if (Math.hypot(x - TOWN.x, z - TOWN.z) > TOWN_CLEAR || hash(Math.round(x * 10), Math.round(z * 10)) < 0.25) continue;
+    if (!drop.has(t)) continue;
     scene.remove(t); trees.splice(i, 1);
     const sw = swayers.findIndex((s) => s.o === t.userData.sway); if (sw >= 0) swayers.splice(sw, 1);
     const c = colliders.findIndex((q) => q.x === x && q.z === z); if (c >= 0) colliders.splice(c, 1);
