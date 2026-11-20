@@ -8955,9 +8955,7 @@ const minimap = (() => {
   const VIEW = 46; // units across the round minimap (close enough that each place gets room)
   const root = document.getElementById('minimap'), cv = document.getElementById('minimapCanvas');
   const panel = document.getElementById('mapPanel'), bigCv = document.getElementById('mapCanvas'), tip = document.getElementById('mapTip');
-  const upBtn = document.getElementById('mapNorthUp'), legendEl = document.getElementById('mapLegend');
-  let northUp = false;
-  try { northUp = localStorage.getItem('driftwood.mapNorthUp') === '1'; } catch { /* private mode: camera-up */ }
+  const legendEl = document.getElementById('mapLegend');
   // the places: one cute icon each (the plots, players and Bo are drawn separately, as they change)
   const ray = (p) => ({ x: p.root.x + p.dir.x * p.len, z: p.root.z + p.dir.z * p.len });
   const B = LAYOUT.beach, pierEnd = { x: dockEnd.x, z: dockEnd.y }, beachPierEnd = ray(B.pier);
@@ -8980,7 +8978,7 @@ const minimap = (() => {
   ];
   const LEGEND = [['⛲', 'Town plaza'], ['👗', 'Clothes shop'], ['🌱', 'Seed shop'], ['🛋️', 'Furniture shop'], ['🐾', 'Pet shop'], ['1', 'Home plot'], ['🏠', 'Claimed home'],
     ['★', 'Your home (gold)'], ['🚲', 'Bicycle stand'], ['🎹', 'Piano'], ['🎡', 'Ferris wheel'], ['🎠', 'Merry-go-round'], ['🎈', 'Balloon park'], ['🍤', 'Restaurant'],
-    ['🏐', 'Volleyball'], ['🍌', 'Banana boats'], ['🪷', 'Pond'], ['🎣', 'Fishing spot'], ['🎒', 'Bo the trader'], ['●', 'Other players'], ['▲', 'You']];
+    ['🏐', 'Volleyball'], ['🍌', 'Banana boats'], ['🪷', 'Pond'], ['🎣', 'Fishing spot'], ['🎒', 'Bo the trader'], ['●', 'Other players'], ['you', 'You']];
 
   // ---- the base map, drawn once (and again only if the world's layout changes: minimap.refresh())
   const base = document.createElement('canvas'); base.width = WU * PPU; base.height = DU * PPU;
@@ -9089,6 +9087,21 @@ const minimap = (() => {
     else if (kind === 'star') { P(); for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + (k / 10) * TAU, rr = k % 2 ? 2.8 : 6.5; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr + 0.5); } ctx.closePath(); ctx.fill(); }
     ctx.restore();
   }
+  // you: a soft glow cone the way you face, then a round pink pin whose point leads the way, with a white heart in it
+  function youMarker(ctx, x, y, R, ang, glow) {
+    ctx.save(); ctx.translate(x, y);
+    const cone = ctx.createRadialGradient(0, 0, R * 0.6, 0, 0, R * 3.4);
+    cone.addColorStop(0, 'rgba(255,90,138,0.45)'); cone.addColorStop(1, 'rgba(255,90,138,0)');
+    ctx.fillStyle = cone; ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, R * 3.4, ang - 0.5, ang + 0.5); ctx.closePath(); ctx.fill();
+    ctx.save(); ctx.rotate(ang);
+    ctx.shadowColor = glow ? 'rgba(255,230,140,0.95)' : 'rgba(90,30,50,0.4)'; ctx.shadowBlur = glow ? R * 1.2 : R * 0.5; ctx.shadowOffsetY = glow ? 0 : R * 0.12;
+    ctx.fillStyle = '#ff5a8a'; ctx.beginPath(); ctx.moveTo(R * 1.75, 0); ctx.arc(0, 0, R, 0.62, TAU - 0.62); ctx.closePath(); ctx.fill();
+    ctx.shadowColor = 'rgba(0,0,0,0)'; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1.5, R * 0.22); ctx.lineJoin = 'round'; ctx.stroke();
+    ctx.restore();
+    const h = R * 0.48; ctx.fillStyle = '#ffffff'; ctx.beginPath(); // a little heart, always upright
+    ctx.moveTo(0, h * 0.85); ctx.bezierCurveTo(-h * 1.3, 0, -h * 0.75, -h * 1.05, 0, -h * 0.35); ctx.bezierCurveTo(h * 0.75, -h * 1.05, h * 1.3, 0, 0, h * 0.85); ctx.fill();
+    ctx.restore();
+  }
   const hits = []; // what's on the full map, for taps: { x, y, name }
   function drawMap(ctx, w, h, cx, cz, s, rot, full) {
     ctx.save(); ctx.clearRect(0, 0, w, h);
@@ -9145,12 +9158,8 @@ const minimap = (() => {
     // you: a bright arrow the way your character faces (glowing a little at night)
     {
       const p = at(player.position.x, player.position.z), hd = player.rotation.y, fx = Math.sin(hd), fz = Math.cos(hd);
-      const ang = Math.atan2(fx * Math.sin(rot) + fz * Math.cos(rot), fx * Math.cos(rot) - fz * Math.sin(rot)), L = sz * 0.62;
-      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(ang);
-      if (night > 0.3) { ctx.shadowColor = 'rgba(255, 230, 140, 0.95)'; ctx.shadowBlur = 8; }
-      ctx.fillStyle = '#ff5a8a'; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(L, 0); ctx.lineTo(-L * 0.7, L * 0.62); ctx.lineTo(-L * 0.35, 0); ctx.lineTo(-L * 0.7, -L * 0.62); ctx.closePath(); ctx.stroke(); ctx.fill();
-      ctx.restore();
+      const ang = Math.atan2(fx * Math.sin(rot) + fz * Math.cos(rot), fx * Math.cos(rot) - fz * Math.sin(rot));
+      youMarker(ctx, p.x, p.y, sz * 0.38, ang, night > 0.3);
       if (full) hits.push({ x: p.x, y: p.y, name: 'You are here' });
     }
     // the compass: a little N on the rim where north (-z) is
@@ -9175,7 +9184,7 @@ const minimap = (() => {
   window.addEventListener('resize', fit);
   if (window.ResizeObserver) new ResizeObserver(() => fit()).observe(cv); // also when the circle's size changes (or first appears)
   fit();
-  const camRot = () => (northUp ? 0 : orbit.yaw); // camera-up: the way the camera looks points up the map
+  const camRot = () => orbit.yaw; // the way the camera looks points up the minimap
   const swallow = (e) => { e.stopPropagation(); if (e.cancelable) e.preventDefault(); };
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'wheel', 'contextmenu']) root.addEventListener(t, swallow, { passive: false });
   root.addEventListener('click', (e) => { swallow(e); openMap(); });
@@ -9195,18 +9204,13 @@ const minimap = (() => {
   function closeMap() { open = false; panel.classList.remove('open'); tip.classList.remove('show'); }
   document.getElementById('mapClose').addEventListener('click', closeMap);
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) closeMap(); });
-  const syncUp = () => { upBtn.classList.toggle('on', northUp); upBtn.setAttribute('aria-pressed', String(northUp)); upBtn.textContent = northUp ? '🧭 Minimap: north up' : '🧭 Minimap: turns with camera'; };
-  syncUp();
-  upBtn.addEventListener('click', () => {
-    northUp = !northUp; syncUp(); wait = 0;
-    try { localStorage.setItem('driftwood.mapNorthUp', northUp ? '1' : '0'); } catch { /* not remembered this time */ }
-  });
   const legendPin = (ic) => {
     const c = document.createElement('canvas'); c.width = c.height = 40; const g = c.getContext('2d'), [k, col] = GLYPH[ic];
     g.fillStyle = col; g.beginPath(); g.arc(20, 20, 17, 0, TAU); g.fill(); g.strokeStyle = '#ffffff'; g.lineWidth = 3; g.stroke(); glyph(g, k, 20, 20, 17);
     return `<img src="${c.toDataURL()}" alt="" width="20" height="20">`;
   };
-  legendEl.innerHTML = LEGEND.map(([ic, name]) => `<span class="lg"><b class="${GLYPH[ic] ? 'pin' : 'sym'}">${GLYPH[ic] ? legendPin(ic) : ic}</b>${name}</span>`).join('');
+  const legendYou = () => { const c = document.createElement('canvas'); c.width = c.height = 40; youMarker(c.getContext('2d'), 17, 21, 11, -Math.PI / 4, false); return `<img src="${c.toDataURL()}" alt="" width="20" height="20">`; };
+  legendEl.innerHTML = LEGEND.map(([ic, name]) => `<span class="lg"><b class="${GLYPH[ic] || ic === 'you' ? 'pin' : 'sym'}">${ic === 'you' ? legendYou() : GLYPH[ic] ? legendPin(ic) : ic}</b>${name}</span>`).join('');
   bigCv.addEventListener('click', (e) => { // tap a place, a plot, a player or Bo: its name
     if (!bigFit) return;
     const rc = bigCv.getBoundingClientRect ? bigCv.getBoundingClientRect() : { left: 0, top: 0 };
@@ -9235,7 +9239,7 @@ const minimap = (() => {
       ctx.save(); ctx.scale(dpr, dpr); drawMap(ctx, bigFit.W, bigFit.H, bigFit.cx, bigFit.cz, bigFit.s, 0, true); ctx.restore();
     }
   }
-  return { update, refresh: () => { drawBase(); wait = 0; }, openMap, closeMap, get open() { return open; }, get northUp() { return northUp; }, places, hits };
+  return { update, refresh: () => { drawBase(); wait = 0; }, openMap, closeMap, get open() { return open; }, places, hits };
 })();
 function frame(now) {
   requestAnimationFrame(frame);
